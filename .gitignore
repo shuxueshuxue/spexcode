@@ -6,6 +6,9 @@ dist/
 # specMech worktrees live here — they are separate checkouts, never committed
 .worktrees/
 
+# harness state
+.claude/
+
 # os / editor
 .DS_Store
 *.log

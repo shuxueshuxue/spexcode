@@ -59,6 +59,13 @@ function Dashboard({ specs }) {
   const downTarget = useMemo(() => (sibIdx < siblings.length - 1 ? siblings[sibIdx + 1] : nearestY('down')), [siblings, sibIdx, nearestY])
   const upTarget    = useMemo(() => (sibIdx > 0 ? siblings[sibIdx - 1] : nearestY('up')), [siblings, sibIdx, nearestY])
 
+  // @@@ onNav - same tree-walk the keyboard does, but driven from the overlay's terminal input
+  // (its empty command line forwards ←/→ parent/child, ↑/↓ siblings). Keeps the overlay open.
+  const onNav = useCallback((dir) => {
+    const t = { up: upTarget, down: downTarget, parent, child: childTarget }[dir]
+    if (t) setFocusId(t.id)
+  }, [upTarget, downTarget, parent, childTarget])
+
   // stable nodes — positions from data, never recomputed; only selected + dim toggle.
   const nodes = useMemo(() => specs.map((s) => {
     const kin = s.id === focusId || s.id === focus.parent || s.parent === focusId || s.parent === focus.parent
@@ -115,7 +122,7 @@ function Dashboard({ specs }) {
       if (overlay) {
         if (e.key === 'Escape') { e.preventDefault(); setOverlay(false); return }
         if (e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); cyclePane(e.shiftKey ? -1 : 1); return }
-        if (pane === 'work') return // the work pane's terminal owns the rest of the keyboard
+        if (pane === 'work') return // work pane's command line owns the keys; it walks the tree via onNav
         if (['1', '2', '3'].includes(e.key)) { e.preventDefault(); e.stopPropagation(); setPane(PANE_KEYS[+e.key - 1]); return }
         if (e.key === 'ArrowUp')    return go(upTarget, e)
         if (e.key === 'ArrowDown')  return go(downTarget, e)
@@ -215,7 +222,7 @@ function Dashboard({ specs }) {
         </button>
       </aside>
 
-      {overlay && <NodeView node={focus} pane={pane} setPane={setPane} onClose={() => setOverlay(false)} />}
+      {overlay && <NodeView node={focus} pane={pane} setPane={setPane} onClose={() => setOverlay(false)} onNav={onNav} />}
     </div>
   )
 }

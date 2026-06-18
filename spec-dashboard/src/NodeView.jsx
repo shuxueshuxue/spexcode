@@ -23,11 +23,12 @@ function SpecPane({ node }) {
 
 // @@@ WorkPane - spec + terminal as one surface: intent on the left (read), the live
 // session on the right (act). Terminal is wider — it's the work surface; spec is reference.
-function WorkPane({ node, onClose }) {
+// onNav lets the terminal's external command line walk the tree when the line is empty.
+function WorkPane({ node, onNav }) {
   return (
     <div className="pane-work">
       <SpecPane node={node} />
-      <TermPane node={node} onClose={onClose} />
+      <TermPane node={node} onNav={onNav} />
     </div>
   )
 }
@@ -73,7 +74,7 @@ function HistoryPane({ node }) {
   )
 }
 
-export default function NodeView({ node, pane, setPane, onClose }) {
+export default function NodeView({ node, pane, setPane, onClose, onNav }) {
   return (
     <div className="ov-backdrop" onMouseDown={onClose}>
       <div className="ov-panel" onMouseDown={(e) => e.stopPropagation()}>
@@ -89,7 +90,7 @@ export default function NodeView({ node, pane, setPane, onClose }) {
           <span className="ov-hint">tab ↹ switch · esc back</span>
         </div>
         <div className="ov-body">
-          {pane === 'work' && <WorkPane node={node} onClose={onClose} />}
+          {pane === 'work' && <WorkPane node={node} onNav={onNav} />}
           {pane === 'evidence' && <EvidencePane node={node} />}
           {pane === 'history' && <HistoryPane node={node} />}
         </div>

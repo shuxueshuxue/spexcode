@@ -1,18 +1,26 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { SESSION_LOG } from './data.js'
 
-// @@@ TermPane - the tmux embed pane. capture-pane -> term.write, send-keys <- term.onData.
-export default function TermPane({ node, onClose }) {
+// @@@ TermPane - the tmux embed as a READ-ONLY display; the command line lives OUTSIDE the
+// terminal (.term-input below). xterm renders capture-pane output; our external input mimics
+// the prompt and echoes commands into the display. Keeping the input external means the arrow
+// keys are ours, not xterm's: when the line is empty, ←/→ walk the tree (parent/child) and
+// ↑/↓ walk siblings instead of being swallowed by the terminal.
+export default function TermPane({ node, onNav }) {
   const hostRef = useRef(null)
+  const inputRef = useRef(null)
+  const termRef = useRef(null)
+  const [cmd, setCmd] = useState('')
 
   useEffect(() => {
     const term = new Terminal({
       fontSize: 13,
       fontFamily: 'Menlo, monospace',
-      cursorBlink: true,
+      cursorBlink: false,
+      disableStdin: true, // display only — xterm captures no keys
       theme: {
         background: '#fdf6e3', foreground: '#586e75', cursor: '#268bd2',
         selectionBackground: '#eee8d5',
@@ -27,19 +35,9 @@ export default function TermPane({ node, onClose }) {
     term.loadAddon(fit)
     term.open(hostRef.current)
     fit.fit()
-
-    term.attachCustomKeyEventHandler((e) => {
-      if (e.type === 'keydown' && e.key === 'Escape') { onClose(); return false }
-      return true
-    })
+    termRef.current = term
 
     SESSION_LOG(node).forEach((line) => term.writeln(line))
-    term.write('\x1b[36m❯ \x1b[0m')
-    term.onData((d) => {
-      if (d === '\r') term.write('\r\n\x1b[36m❯ \x1b[0m')
-      else if (d === '\x7f') term.write('\b \b')
-      else term.write(d)
-    })
 
     let tick
     if (node.session) {
@@ -50,20 +48,62 @@ export default function TermPane({ node, onClose }) {
           `\x1b[32m● Read\x1b[0m src/App.jsx`,
           `\x1b[35m✻\x1b[0m verifying B against scenario`,
         ]
-        term.write(`\r\n${lines[n++ % lines.length]}\r\n\x1b[36m❯ \x1b[0m`)
+        term.writeln(lines[n++ % lines.length])
       }, 2600)
     }
 
     const onResize = () => fit.fit()
     window.addEventListener('resize', onResize)
-    setTimeout(() => { fit.fit(); term.focus() }, 0)
+    setTimeout(() => fit.fit(), 0)
 
     return () => {
       if (tick) clearInterval(tick)
       window.removeEventListener('resize', onResize)
       term.dispose()
+      termRef.current = null
     }
   }, [node]) // eslint-disable-line
 
-  return <div className="pane-term" ref={hostRef} />
+  // focus the external input on each node, so typing + arrow-nav stay live as you toggle nodes.
+  useEffect(() => {
+    setCmd('')
+    const id = setTimeout(() => inputRef.current?.focus(), 0)
+    return () => clearTimeout(id)
+  }, [node])
+
+  const run = () => {
+    const line = cmd.trim()
+    if (!line) return
+    termRef.current?.writeln(`\x1b[36m❯\x1b[0m ${line}`) // mimic: echo the command into the display
+    setCmd('')
+  }
+
+  // @@@ arrow fall-through - the whole point. When the line is EMPTY the arrows are navigation,
+  // not text editing, so we hand them to the tree. With text present they edit the line as usual
+  // (and we stop them bubbling so nothing double-fires).
+  const NAV = { ArrowLeft: 'parent', ArrowRight: 'child', ArrowUp: 'up', ArrowDown: 'down' }
+  const onKeyDown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); run(); return }
+    if (NAV[e.key] && cmd === '') { e.preventDefault(); onNav?.(NAV[e.key]); return }
+    e.stopPropagation()
+  }
+
+  return (
+    <div className="pane-term">
+      <div className="term-host" ref={hostRef} />
+      <div className="term-input">
+        <span className="term-prompt">❯</span>
+        <input
+          ref={inputRef}
+          className="term-line"
+          value={cmd}
+          onChange={(e) => setCmd(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder="type a command · ←/→ switch nodes when empty"
+          spellCheck={false}
+          autoComplete="off"
+        />
+      </div>
+    </div>
+  )
 }

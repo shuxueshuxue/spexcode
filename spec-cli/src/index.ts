@@ -87,11 +87,13 @@ app.get('/api/sessions/:id/socket', upgradeWebSocket((c) => {
     onClose() { if (viewer) detachViewer(id, viewer) },
   }
 }))
-// the docked ❯ line input (and server-side merge dispatch) still send a whole line via send-keys.
+// the docked ❯ line input (and server-side merge dispatch) dispatch a whole prompt through the rendezvous
+// control socket. Socket-only + fail-loud: a prompt the agent doesn't confirm accepting returns 502 with the
+// reason (never a silent 200), so the dashboard/manager sees a dead dispatch instead of a false success.
 app.post('/api/sessions/:id/keys', async (c) => {
   const body = await c.req.json().catch(() => ({}))
-  const ok = await sendKeys(c.req.param('id'), typeof body?.text === 'string' ? body.text : '', body?.enter !== false)
-  return c.json({ ok }, ok ? 200 : 404)
+  const r = await sendKeys(c.req.param('id'), typeof body?.text === 'string' ? body.text : '')
+  return c.json(r, r.ok ? 200 : 502)
 })
 // @@@ raw single-keystroke nav - the PRESERVED tmux send-keys path, distinct from the prompt socket the
 // ❯ box uses. The dashboard's nav mode POSTs one key per keydown so a human can drive the agent's

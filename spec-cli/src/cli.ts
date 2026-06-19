@@ -143,7 +143,11 @@ if (cmd === 'serve') {
   } else if (sub === 'close') {
     console.log(await s.closeSession(id) ? `closed ${id}` : `no such session ${id}`)
   } else if (sub === 'send') {
-    console.log(await s.sendKeys(id, process.argv[5] ?? '', true) ? 'sent' : `not live ${id}`)
+    // prompt dispatch is socket-only + fail-loud: a non-accepted prompt prints the reason AND exits
+    // non-zero, so a manager/script never mistakes a dead dispatch for success.
+    const r = await s.sendKeys(id, process.argv[5] ?? '')
+    console.log(r.ok ? 'sent' : `dispatch failed: ${r.error}`)
+    process.exit(r.ok ? 0 : 1)
   } else if (sub === 'capture') {
     process.stdout.write(await s.captureSession(id))   // the session's live pane (output), for agents
   } else if (sub === 'prompt') {

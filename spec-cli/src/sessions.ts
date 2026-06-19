@@ -39,34 +39,76 @@ const TMUX_SOCK = process.env.SPEXCODE_TMUX || 'spexcode'
 const CLAUDE_CMD = process.env.SPEXCODE_CLAUDE_CMD || 'claude --dangerously-skip-permissions'
 const COLS = 120, ROWS = 32
 
-// @@@ rendezvous control socket - the DETERMINISTIC input path for sessions WE launch. We start `claude`
-// with CLAUDE_BG_BACKEND=daemon + CLAUDE_BG_RENDEZVOUS_SOCK=<per-session sock> set ONLY on that one
-// spawned command (env prefix on the launch line — never global/exported, never a plugin or global
+// @@@ rendezvous control socket - the DETERMINISTIC, ONLY input path for PROMPTS to sessions WE launch. We
+// start `claude` with CLAUDE_BG_BACKEND=daemon + CLAUDE_BG_RENDEZVOUS_SOCK=<per-session sock> set ONLY on
+// that one spawned command (env prefix on the launch line — never global/exported, never a plugin or global
 // setting). claude opens a unix socket at that path; writing one line `{"type":"reply","text":"…"}\n` to
 // it injects the text as a prompt and submits it — no PTY typing, so multi-line input and Enters can't be
 // corrupted the way `tmux send-keys` was. The path is uniquely derived from the session id, so we only
 // ever address OUR OWN sockets (HARD ethics rule: never touch a Claude Code session outside this product).
 // tmux stays the VISIBLE stream (pty-bridge); the socket is CONTROL (input) only. The socket lives in
-// tmpdir tied to the claude process, so no extra lifecycle — claude/the OS owns it. Best-effort: if the
-// socket is absent (older/socketless session, or not yet up) or errors, sendKeys FALLS BACK to send-keys.
+// tmpdir tied to the claude process, so no extra lifecycle — claude/the OS owns it. There is NO send-keys
+// fallback for prompts: a missing socket, a connect error, or a prompt the daemon does not confirm ACCEPTED
+// is a LOUD failure that propagates to the caller (API non-2xx) — never a silent degradation to typing into
+// the pane, which previously fooled us into thinking a dead dispatch had worked.
 const rvSock = (id: string) => join(tmpdir(), `spexcode-rv-${id}.sock`)
 // env prefix put in front of the spawned `claude` so it creates this session's rendezvous control socket.
 const rvEnv = (id: string) => `CLAUDE_BG_BACKEND=daemon CLAUDE_BG_RENDEZVOUS_SOCK=${rvSock(id)}`
-// inject `text` as a prompt by writing one reply line to the session's rendezvous socket. Resolves true
-// only on a clean connect+write; ANY error (or a 1s stall) resolves false so the caller falls back to
-// send-keys. Never throws — the socket path is strictly best-effort control.
-function replyViaSocket(sock: string, text: string): Promise<boolean> {
+
+// a prompt-dispatch outcome. ok=true ONLY when the agent confirmably ACCEPTED the prompt; otherwise `error`
+// carries a human-readable reason that propagates to the API route (non-2xx) and the CLI/dashboard/manager.
+export type DispatchResult = { ok: boolean; error?: string }
+const ACCEPT_TIMEOUT_MS = 2500
+
+// @@@ replyViaSocket - inject `text` as a prompt AND confirm the daemon ACCEPTED it (not mere write-success,
+// which is what silently masked dead dispatches before). The CLAUDE_BG_BACKEND=daemon rendezvous server
+// sends NO ack for an accepted reply, so we confirm via an IN-ORDER round-trip: we write
+// `{type:reply}\n{type:repaint}\n`. The daemon dispatches socket lines strictly in order (one handler per
+// newline-framed line) and ENQUEUES the reply BEFORE it handles the repaint and answers `{type:repaint-done}`
+// — so a `repaint-done` with NO preceding `reply-rejected` proves the reply was processed/enqueued. `repaint`
+// is auth-exempt and always answers, so it's a reliable probe even against a future daemon that gates
+// `reply` behind auth: a gated reply emits `reply-rejected` FIRST (in-order, before repaint-done), which we
+// treat as failure. `reply-rejected` / `shutting-down`, a connect/socket error, an early close, or no
+// confirmation within ACCEPT_TIMEOUT_MS ALL resolve to a loud failure with a specific reason. The forced
+// repaint is a harmless full redraw of the agent's OWN TUI. Never throws — the reason is returned, not swallowed.
+function replyViaSocket(sock: string, text: string): Promise<DispatchResult> {
   return new Promise((resolve) => {
-    let settled = false
-    const done = (ok: boolean) => { if (!settled) { settled = true; resolve(ok) } }
+    let settled = false, buf = ''
+    let c: ReturnType<typeof createConnection>
+    const done = (r: DispatchResult) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      try { c?.destroy() } catch { /* */ }
+      resolve(r)
+    }
+    const timer = setTimeout(
+      () => done({ ok: false, error: `rendezvous socket gave no acceptance confirmation within ${ACCEPT_TIMEOUT_MS}ms` }),
+      ACCEPT_TIMEOUT_MS,
+    )
     try {
-      const c = createConnection({ path: sock })
-      const t = setTimeout(() => { try { c.destroy() } catch { /* */ } done(false) }, 1000)
-      c.on('error', () => { clearTimeout(t); done(false) })
-      c.on('connect', () => {
-        c.write(JSON.stringify({ type: 'reply', text }) + '\n', () => { clearTimeout(t); c.end(); done(true) })
-      })
-    } catch { done(false) }
+      c = createConnection({ path: sock })
+    } catch (e) {
+      done({ ok: false, error: `rendezvous socket connect threw: ${String(e)}` })
+      return
+    }
+    c.on('error', (e: NodeJS.ErrnoException) => done({ ok: false, error: `rendezvous socket connect failed: ${e?.code || String(e)}` }))
+    c.on('close', () => done({ ok: false, error: 'rendezvous connection closed before the prompt was confirmed accepted' }))
+    c.on('connect', () => c.write(JSON.stringify({ type: 'reply', text }) + '\n' + JSON.stringify({ type: 'repaint' }) + '\n'))
+    c.on('data', (chunk: Buffer) => {
+      buf += chunk.toString('utf8')
+      let i: number
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i); buf = buf.slice(i + 1)
+        if (!line) continue
+        let type: string | undefined
+        try { type = JSON.parse(line)?.type } catch { continue }   // ignore any non-JSON noise on the wire
+        if (type === 'reply-rejected') return done({ ok: false, error: 'agent REJECTED the prompt (rendezvous reply-rejected — auth-gated daemon?)' })
+        if (type === 'shutting-down') return done({ ok: false, error: 'agent is shutting down — prompt not accepted' })
+        if (type === 'repaint-done') return done({ ok: true })   // reply was enqueued in-order before this
+        // heartbeat / state / other frames → keep waiting for the decisive repaint-done or a rejection.
+      }
+    })
   })
 }
 
@@ -547,8 +589,8 @@ export async function mergeSession(id: string): Promise<{ ok: boolean; dispatche
   const wt = await findWorktree(id)
   if (!wt || !wt.branch) return { ok: false, error: 'no such session' }
   await reopen(id)  // clear the proposal → active, and --resume the agent if its tmux died
-  const dispatched = await sendKeys(id, mergePrompt(wt.branch, mainRoot()), true)
-  return dispatched ? { ok: true, dispatched: true } : { ok: false, error: 'agent not reachable' }
+  const r = await sendKeys(id, mergePrompt(wt.branch, mainRoot()))
+  return r.ok ? { ok: true, dispatched: true } : { ok: false, error: r.error ?? 'agent not reachable' }
 }
 
 // @@@ closeSession - the ONLY removal (human-confirmed): kills tmux, removes the worktree + branch.
@@ -673,18 +715,19 @@ export async function watchSessions(emit: (line: string) => void, opts: WatchOpt
     await sleep(intervalMs)
   }
 }
-// @@@ sendKeys - CONTROL (input) for a session. Prefer the per-session rendezvous socket (deterministic,
-// no PTY typing): if it exists and we have text, write one reply line — the socket path injects AND submits,
-// so no separate Enter. The socket only exists for sessions WE launched the new way, and its path is
-// derived from the id, so we never address another session's socket. Any socket miss/error (or an empty
-// text-only Enter, which has nothing to inject) FALLS BACK to the unchanged `tmux send-keys` behavior.
-export async function sendKeys(id: string, text: string, enter: boolean): Promise<boolean> {
+// @@@ sendKeys - PROMPT control for a session, through the per-session rendezvous socket ONLY. The socket
+// injects AND submits the prompt and confirms the agent ACCEPTED it (see replyViaSocket); there is NO
+// send-keys fallback. A prompt that can't go through the socket — no socket (socketless/old session, or the
+// agent is offline), a connect error, or no acceptance confirmation — FAILS LOUD: it returns ok:false with a
+// reason that propagates to the caller (API non-2xx, `spex session send`, the merge dispatch), instead of
+// silently degrading to typing into the pane and reporting a false success. The socket exists only for
+// sessions WE launched the new way and its path is derived from the id, so we never address another
+// session's socket. (The separate RAW nav-key channel keeps its own `tmux send-keys` path — see rawKey.)
+export async function sendKeys(id: string, text: string): Promise<DispatchResult> {
+  if (!text) return { ok: false, error: 'empty prompt — nothing to dispatch' }
   const sock = rvSock(id)
-  if (text && existsSync(sock) && await replyViaSocket(sock, text)) return true  // injected + submitted
-  if (!(await alive(id))) return false
-  if (text) await tmux(['send-keys', '-t', id, '-l', '--', text])
-  if (enter) await tmux(['send-keys', '-t', id, 'Enter'])
-  return true
+  if (!existsSync(sock)) return { ok: false, error: `no rendezvous control socket for session ${id} (socketless/old session, or the agent is offline) — prompt NOT delivered` }
+  return replyViaSocket(sock, text)
 }
 
 // @@@ rawKey - the RAW-KEYSTROKE nav path, kept DELIBERATELY on `tmux send-keys` and NEVER the rendezvous

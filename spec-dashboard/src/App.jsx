@@ -197,10 +197,7 @@ function Dashboard({ specs, sessions, reload }) {
       scrollAnimRef.current = requestAnimationFrame(step)
     }
     const onKey = (e) => {
-      if (sessionUI) {
-        if (e.key === 'Escape') { e.preventDefault(); setSessionUI(false) }
-        return // the session interface owns arrows / Enter / typing
-      }
+      if (sessionUI) return // the session interface owns ALL its keys (arrows / Enter / typing / Esc)
       if (overlay) {
         if (e.key === 'Escape') { e.preventDefault(); setOverlay(false); return }
         if (e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); cyclePane(e.shiftKey ? -1 : 1); return }
@@ -302,6 +299,7 @@ function Dashboard({ specs, sessions, reload }) {
       {sessionUI && (
         <SessionInterface
           sessions={sessions}
+          specs={specs}
           focusNode={focus}
           sel={sessionSel}
           setSel={setSessionSel}

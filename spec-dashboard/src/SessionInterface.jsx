@@ -19,8 +19,41 @@ import SessionTerm from './SessionTerm.jsx'
 
 const STATUS_DOT = { working: '#cb4b16', idle: '#93a1a1', offline: '#657b83', review: '#6c71c4', done: '#268bd2', 'close-pending': '#cb4b16', blocked: '#2aa198', error: '#dc322f', 'needs-input': '#b58900' }
 
-export default function SessionInterface({ sessions, focusNode, sel, setSel, onClose, onCreated }) {
+// @@@ @-mention helpers - the spec path the menu matches against (`.spec/a/b/<id>/spec.md`), shown
+// minus the `.spec/` shell and the `/spec.md` leaf, so the row reads like the tree breadcrumb it is.
+const specPath = (p) => (p || '').replace(/^\.spec\//, '').replace(/\/spec\.md$/, '')
+
+// rank spec nodes for a partial @query. id beats path; a prefix beats a mid-match; shorter ids win
+// ties so the most specific node floats up. Empty query (just typed `@`) lists everything, shortest-first.
+function matchSpecs(specs, query) {
+  const q = query.toLowerCase()
+  const scored = []
+  for (const s of specs) {
+    const id = s.id.toLowerCase()
+    const path = specPath(s.path).toLowerCase()
+    let score
+    if (!q) score = 3
+    else if (id.startsWith(q)) score = 0
+    else if (id.includes(q)) score = 1
+    else if (path.includes(q)) score = 2
+    else continue
+    scored.push({ s, score })
+  }
+  scored.sort((a, b) => a.score - b.score || a.s.id.length - b.s.id.length || a.s.id.localeCompare(b.s.id))
+  return scored.slice(0, 8).map((x) => x.s)
+}
+
+// bold the first case-insensitive hit of the query inside a label (the part the user has typed so far).
+function highlight(text, q) {
+  if (!q) return text
+  const i = text.toLowerCase().indexOf(q.toLowerCase())
+  if (i < 0) return text
+  return <>{text.slice(0, i)}<b className="mention-hit">{text.slice(i, i + q.length)}</b>{text.slice(i + q.length)}</>
+}
+
+export default function SessionInterface({ sessions, specs = [], focusNode, sel, setSel, onClose, onCreated }) {
   const [prompt, setPrompt] = useState('')
+  const [menu, setMenu] = useState(null)      // @-mention dropdown: { items, index, start, end, query }
   const [msg, setMsg] = useState('')          // bottom input for talking to an active session
   const [sending, setSending] = useState(false)
   const taRef = useRef(null)
@@ -89,6 +122,34 @@ export default function SessionInterface({ sessions, focusNode, sel, setSel, onC
     }
   }
 
+  // @@@ @-mention menu - while typing the New Session prompt, an `@` that begins a word opens a dropdown
+  // of spec nodes filtered by what follows it (matched against id + spec path). Picking one drops a clean
+  // `@<id>` token in place. The trigger is purely positional: we scan back from the caret over non-space
+  // chars; it's a mention only if we hit an `@` sitting at a word boundary with no space up to the caret.
+  const buildMenu = (value, caret) => {
+    let i = caret - 1
+    while (i >= 0 && value[i] !== '@' && !/\s/.test(value[i])) i--
+    if (i < 0 || value[i] !== '@') return null
+    if (i > 0 && !/\s/.test(value[i - 1])) return null        // @ must start a word, not be mid-token (email-ish)
+    const query = value.slice(i + 1, caret)
+    const items = matchSpecs(specs, query)
+    if (!items.length) return null
+    return { items, index: 0, start: i, end: caret, query }
+  }
+  // recompute from the textarea's live value + caret (covers typing, deletes, and bare caret moves).
+  const syncMenu = (el) => setMenu(el ? buildMenu(el.value, el.selectionStart) : null)
+  const navMenu = (dir) => setMenu((m) => (m ? { ...m, index: (m.index + dir + m.items.length) % m.items.length } : m))
+  // replace the `@query` span under the caret with the picked node's `@<id> `, then drop the caret after it.
+  const accept = (item) => {
+    if (!item || !menu) return
+    const insert = `@${item.id} `
+    const before = prompt.slice(0, menu.start)
+    setPrompt(before + insert + prompt.slice(menu.end))
+    setMenu(null)
+    const caret = before.length + insert.length
+    requestAnimationFrame(() => { const el = taRef.current; if (el) { el.focus(); el.setSelectionRange(caret, caret) } })
+  }
+
   const sendMsg = async () => {
     const text = msg
     if (!text.trim() || active === 'new') return
@@ -116,10 +177,19 @@ export default function SessionInterface({ sessions, focusNode, sel, setSel, onC
 
   // @@@ window-level list nav - ↑/↓ move the selection regardless of focus; Enter on New launches.
   const stateRef = useRef({})
-  stateRef.current = { order, active, submit }
+  stateRef.current = { order, active, submit, menu, navMenu, accept, setMenu, onClose }
   useEffect(() => {
     const onKey = (e) => {
-      const { order, active, submit } = stateRef.current
+      const { order, active, submit, menu, navMenu, accept, setMenu, onClose } = stateRef.current
+      // the @-mention menu owns navigation/commit/dismiss while it's open (New Session tab only).
+      if (active === 'new' && menu) {
+        if (e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); navMenu(1); return }
+        if (e.key === 'ArrowUp')   { e.preventDefault(); e.stopPropagation(); navMenu(-1); return }
+        if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); accept(menu.items[menu.index]); return }
+        if (e.key === 'Escape')    { e.preventDefault(); e.stopPropagation(); setMenu(null); return }
+      }
+      // Esc closes the whole interface (App delegates it here so the menu can claim it first, above).
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); return }
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         e.preventDefault(); e.stopPropagation()
         const i = order.indexOf(active)
@@ -165,11 +235,32 @@ export default function SessionInterface({ sessions, focusNode, sel, setSel, onC
                   className="si-input"
                   rows={1}
                   value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="describe the work · ⏎ to launch · ⇧⏎ newline"
+                  onChange={(e) => { setPrompt(e.target.value); syncMenu(e.target) }}
+                  onSelect={(e) => syncMenu(e.target)}
+                  onBlur={() => setMenu(null)}
+                  placeholder="describe the work · @ to reference a spec · ⏎ to launch · ⇧⏎ newline"
                   spellCheck={false}
                   disabled={sending}
                 />
+                {menu && (
+                  <ul className="mention-menu" role="listbox">
+                    <li className="mention-head">// {menu.query ? `@${menu.query}` : 'spec nodes'} — ↑↓ pick · ⏎ insert</li>
+                    {menu.items.map((it, i) => (
+                      <li
+                        key={it.id}
+                        role="option"
+                        aria-selected={i === menu.index}
+                        className={i === menu.index ? 'mention-item on' : 'mention-item'}
+                        onMouseDown={(e) => { e.preventDefault(); accept(it) }}
+                        onMouseEnter={() => setMenu((m) => (m ? { ...m, index: i } : m))}
+                      >
+                        <span className="mention-dot" style={{ background: STATUS_DOT[it.status] || '#93a1a1' }} />
+                        <span className="mention-id">@{highlight(it.id, menu.query)}</span>
+                        <span className="mention-path">{specPath(it.path)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
               <div className="si-hint">
                 {focusNode

@@ -119,15 +119,16 @@ The **merge is an INTENT the human expresses, not a fixed server script**. Low-l
 dashboard do not run server-side: the human acts at the level of intent and the session's OWN agent performs
 the operation. So `mergeSession` carries no `git merge` logic of its own — it is a DISPATCH. It reopens the
 session (clears the proposal → active, `--resume`s the agent if its tmux died, reusing `reopen`), then
-dispatches a merge prompt into the agent (reusing `sendKeys`, which prefers the rendezvous control
-socket — see below). The injected prompt tells the agent to merge
+dispatches a merge prompt into the agent (reusing `sendKeys`, the socket-only fail-loud prompt path — see
+below). The injected prompt tells the agent to merge
 its branch into main, resolve any conflicts itself (it knows the intent of the work), verify that main's
 HEAD actually advanced and that no merge is left in progress, run `git merge --abort` to restore main if
 anything goes half-merged, and propose close once the merge is verified. Because the agent performs and
 verifies the merge, main is never left half-merged and a no-op is never miscounted as a merge — the
 guarantee lives in the agent's verification, not a server check. The action is **async**: `POST
-/api/sessions/:id/merge` returns 200 `{ dispatched: true }` as soon as the prompt is sent (409 only if the
-session/agent is unreachable); the agent does the work and re-proposes or closes when done. The server no
+/api/sessions/:id/merge` returns 200 `{ dispatched: true }` as soon as the prompt is **confirmed accepted**
+by the agent (409 if the session/agent is unreachable or the prompt was not accepted); the agent does the
+work and re-proposes or closes when done. The server no
 longer bumps `merges` on a click — if a merge count is still wanted it is the agent's to record after a
 verified merge. (This prompt-dispatch pattern is currently scoped to merge; other low-level ops generalize
 to it later.)
@@ -178,23 +179,36 @@ pane bytes both ways, a text frame is the `{t:'resize'}` control. `node-pty` nee
 prebuilds); a `postinstall` only restores the `spawn-helper` execute bit npm drops. `captureSession`
 stays for `spex capture` (agent-facing pane snapshot); `resizeSession`/`pipe-pane`/SSE are gone.
 
-### Control (input) is a per-session rendezvous socket; tmux is display
+### Prompt control is the per-session rendezvous socket ONLY (fail-loud); tmux is display
 
-Driving a session — sending a prompt, a continue, the merge instruction — is **control**, separate from
-the tmux pane, which is **display only** (the live terminal, above). Control goes through a **per-session
-rendezvous socket**, not by typing into the pane: at launch the spawned `claude` is given
-`CLAUDE_BG_BACKEND=daemon` and a `CLAUDE_BG_RENDEZVOUS_SOCK` path **uniquely derived from the session id**,
-set as an env prefix on that one command only — never global/exported, never a plugin or shared setting.
-claude opens a unix socket there; writing one line `{"type":"reply","text":…}` injects the text as a
-prompt and submits it deterministically — no PTY keystrokes, so multi-line prompts and Enters can't be
-corrupted the way `tmux send-keys` could. `sendKeys` prefers this socket: if the session's socket exists it
-writes the reply line (the socket both injects **and** submits, so no separate Enter) and returns; for an
-older/socketless session, an empty text-only Enter, or any socket error it **falls back unchanged to `tmux
-send-keys`** (best-effort — a socket failure never throws). Because the path is derived from the id, only
-**our own** sockets are ever addressed: control is strictly scoped to sessions this product launched and
-never reaches a Claude Code session outside it. The socket lives in the OS temp dir tied to the claude
-process, so it needs no extra lifecycle. `reopen`'s in-pane `--resume` carries the same env prefix, so a
-revived agent regains its control socket; `mergeSession` dispatches through this same `sendKeys`.
+Dispatching a **prompt** to a session — a message, a continue, the merge instruction — is **control**,
+separate from the tmux pane, which is **display only** (the live terminal, above). Prompt control goes
+through a **per-session rendezvous socket ONLY**, never by typing into the pane: at launch the spawned
+`claude` is given `CLAUDE_BG_BACKEND=daemon` and a `CLAUDE_BG_RENDEZVOUS_SOCK` path **uniquely derived from
+the session id**, set as an env prefix on that one command only — never global/exported, never a plugin or
+shared setting. claude opens a unix socket there; writing one line `{"type":"reply","text":…}` injects the
+text as a prompt and submits it deterministically — no PTY keystrokes, so multi-line prompts and Enters
+can't be corrupted the way `tmux send-keys` could. Because the path is derived from the id, only **our own**
+sockets are ever addressed: control is strictly scoped to sessions this product launched and never reaches a
+Claude Code session outside it.
+
+`sendKeys` is **socket-only with no send-keys fallback**, and it confirms the agent actually **ACCEPTED**
+the prompt rather than reporting mere write-success. The daemon sends no ack for an accepted reply, so
+acceptance is confirmed by an **in-order round-trip**: `sendKeys` writes a `reply` line immediately followed
+by a `repaint` line; the daemon dispatches socket lines strictly in order, enqueuing the reply before it
+answers `repaint-done`, so a `repaint-done` with no preceding `reply-rejected` proves the reply was taken
+(`repaint` is auth-exempt and always answers, making it a reliable probe even if a future daemon gates
+`reply` behind auth — a gated reply emits `reply-rejected` first). A missing/socketless session, a connect
+error, a `reply-rejected`/`shutting-down`, or no confirmation within the timeout all return a **loud failure
+with a specific reason** (`DispatchResult` `{ok,error}`) that **propagates to the caller** — `POST
+…/keys` answers **502** (not 200), `spex session send` prints the reason, and `mergeSession` returns it —
+so a dead dispatch is seen, never silently degraded to typing into the pane (which previously masked a
+broken dispatch as success). Because the path is derived from the id, the socket lives in the OS temp dir
+tied to the claude process, needing no extra lifecycle. `reopen`'s in-pane `--resume` carries the same env
+prefix, so a revived agent regains its control socket; `mergeSession` dispatches through this same
+`sendKeys`. The **separate raw nav-key channel** (`rawKey`) keeps its own `tmux send-keys` path — that is
+the interactive single-keystroke channel for driving the agent's TUI menus in real time, NOT a prompt
+fallback, and is deliberately left untouched.
 
 For the terminal: `spex ls` is the human-readable living-sessions table — a column header, each session's
 truncated note/prompt, and a glyph→meaning legend (`statusLegend`, built from `STATUS_GLYPH` so it can't

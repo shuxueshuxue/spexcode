@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { repoRoot, gitA, worktreeSpecDelta, type NodeOp } from './git.js'
+import { repoRoot, gitA, headSha, worktreeSpecSig, worktreeSpecDelta, type NodeOp } from './git.js'
 
 // @@@ portable layout - the ONE seam where "where things live" is policy, not hardcode.
 // Mechanism (read .spec, git log) is fixed; this resolves: where is main, how to enumerate the
@@ -50,6 +50,34 @@ function readSession(dir: string) {
   return r
 }
 
+// @@@ overlay cache - the board overlay (each managed worktree's spec-delta vs main) is the expensive
+// part of /api/layout: `worktreeSpecDelta` spawns 3 git diffs PER worktree, and warm that WAS the whole
+// cost (the result is ~2KB, so the ~230ms was pure spawn overhead). The delta is a pure function of
+// main's HEAD, the worktree's HEAD, and its `.spec` working-tree state, so we memo `ops` per worktree
+// keyed on those three — all read from the FILESYSTEM (headSha + worktreeSpecSig), no git subprocess. A
+// warm /api/layout then spawns only the single `git worktree list`; a worktree's diffs re-run ONLY when
+// its key changes (a commit moves a HEAD, a spec edit / new untracked spec.md moves the sig). Correctness
+// over speed: the key reflects every real change, so a new commit or a new session reflects at once —
+// never stale; the cheap fields (node/session/status from `.session`) are re-read fresh, never cached.
+const deltaCache = new Map<string, { key: string; ops: NodeOp[] }>()
+const safeHead = (p: string): string => { try { return headSha(p) } catch { return '' } }
+let layoutHeadWarned = false
+async function cachedDelta(wtPath: string, mainRef: string, mainHead: string): Promise<NodeOp[]> {
+  const wtHead = safeHead(wtPath)
+  // fail loud, never stale: if a HEAD can't be read the key is untrustworthy — bypass the cache and
+  // recompute (warn once) rather than risk serving a delta keyed on an empty sha across a real change.
+  if (!mainHead || !wtHead) {
+    if (!layoutHeadWarned) { layoutHeadWarned = true; console.warn('spec-cli: layout overlay cache bypassed (unreadable HEAD), recomputing every read') }
+    return worktreeSpecDelta(wtPath, mainRef)
+  }
+  const key = `${mainHead}\0${wtHead}\0${worktreeSpecSig(wtPath)}`
+  const hit = deltaCache.get(wtPath)
+  if (hit && hit.key === key) return hit.ops
+  const ops = await worktreeSpecDelta(wtPath, mainRef)
+  deltaCache.set(wtPath, { key, ops })
+  return ops
+}
+
 export async function resolveLayout(): Promise<Layout> {
   const root = repoRoot()
   const cfg = readConfig(root)
@@ -59,8 +87,12 @@ export async function resolveLayout(): Promise<Layout> {
     nodeFrom: cfg.nodeFrom ?? 'branch',
   }
   const raw = await gitWorktrees(root)
-  const mainRef = raw.find((w) => w.branch === 'main')?.branch ?? 'main'
-  // each worktree's spec delta is independent — compute them all in parallel (each is async/non-blocking).
+  const mainWt = raw.find((w) => w.branch === 'main')
+  const mainRef = mainWt?.branch ?? 'main'
+  // main's HEAD (filesystem read, no subprocess) keys every worktree's overlay: the deltas diff against
+  // main, so when main advances (a merge) every cached delta must recompute.
+  const mainHead = mainWt ? safeHead(mainWt.path) : ''
+  // each worktree's spec delta is independent — compute (or cache-hit) them all in parallel.
   const worktrees = await Promise.all(raw.map(async (w) => {
     const sess = readSession(w.path)
     const isMain = w.branch === 'main'
@@ -72,9 +104,12 @@ export async function resolveLayout(): Promise<Layout> {
     // scratch worktrees (e.g. agent-*) are skipped, both to keep them off the board AND to avoid their
     // (often large) diffs dominating /api/layout latency.
     const managed = !!sess.session || (!!w.branch && w.branch.startsWith(convention.branchPrefix))
-    const ops = isMain || !managed ? [] : await worktreeSpecDelta(w.path, mainRef)
+    const ops = isMain || !managed ? [] : await cachedDelta(w.path, mainRef, mainHead)
     return { path: w.path, branch: w.branch, node, session: sess.session, status: sess.status, isMain, ops }
   }))
+  // drop cache entries for worktrees that no longer exist (a closed session), so the map stays bounded.
+  const live = new Set(raw.map((w) => w.path))
+  for (const k of [...deltaCache.keys()]) if (!live.has(k)) deltaCache.delete(k)
   const main = convention.main || worktrees.find((w) => w.isMain)?.path || root
   return { main, convention, worktrees }
 }

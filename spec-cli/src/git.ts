@@ -1,6 +1,6 @@
 import { execFileSync, execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { readFileSync, statSync, existsSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
 import { join, isAbsolute, resolve } from 'node:path'
 
 // @@@ git is the database - a spec's version history IS the git log of its spec.md.
@@ -90,6 +90,33 @@ export function headSha(root: string): string {
     }
   }
   throw new Error(`headSha: cannot resolve ${name}`)
+}
+
+// @@@ worktreeSpecSig - a subprocess-free fingerprint of a worktree's `.spec` WORKING TREE, the same
+// kind of filesystem-read cache key headSha is for the spec-history cache. The board overlay
+// (`worktreeSpecDelta`, the expensive part of /api/layout) is a pure function of three inputs: main's
+// HEAD, this worktree's HEAD, and its `.spec` working-tree state (committed + staged + unstaged +
+// untracked spec.md). A signature over that third input lets /api/layout reuse a cached delta until it
+// actually changes, instead of spawning the 3 git diffs per worktree on every warm read. We fingerprint
+// every file under `.spec` by path + mtimeMs + size: an edit bumps mtime, an add/delete/reparent changes
+// the path set — so any change the diff would notice changes the signature. Pure readdir/stat over a
+// tiny tree (sub-ms), NO git subprocess. '' when `.spec` is absent (an empty, stable overlay).
+export function worktreeSpecSig(wtPath: string): string {
+  const root = join(wtPath, '.spec')
+  if (!existsSync(root)) return ''
+  const parts: string[] = []
+  const stack = [root]
+  while (stack.length) {
+    const dir = stack.pop()!
+    let ents
+    try { ents = readdirSync(dir, { withFileTypes: true }) } catch { continue }
+    for (const e of ents) {
+      const p = join(dir, e.name)
+      if (e.isDirectory()) { stack.push(p); continue }
+      try { const st = statSync(p); parts.push(`${p}:${st.mtimeMs}:${st.size}`) } catch { /* vanished mid-walk */ }
+    }
+  }
+  return parts.sort().join('\n')
 }
 
 export type Version = { hash: string; date: string; reason: string; session: string | null }

@@ -20,6 +20,10 @@ function resolveParent(path: string, byDir: Record<string, string>): string | nu
 }
 
 export async function buildBoard() {
+  // all three sources are warm-cheap and independent, so the board inherits their speed for free: loadSpecs
+  // REUSES the HEAD-keyed spec-history cache (the git-derived node data — see specs.ts/git.ts), resolveLayout
+  // reuses the per-worktree overlay cache and recomputes only the deltas that actually changed (the live
+  // OVERLAY), and listSessions takes its liveness from ONE batched tmux snapshot. Nothing here re-walks git.
   const [layout, sessions, specs] = await Promise.all([resolveLayout(), listSessions(), loadSpecs()])
   const worktrees = layout.worktrees.filter((w) => !w.isMain)
   // resolveLayout already zeroed ops for unmanaged worktrees, so this is just "has pending changes".

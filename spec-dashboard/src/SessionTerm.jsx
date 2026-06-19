@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -14,7 +14,6 @@ import '@xterm/xterm/css/xterm.css'
 export default function SessionTerm({ sessionId, senders }) {
   const hostRef = useRef(null)
   const termRef = useRef(null)
-  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     const term = new Terminal({
@@ -97,26 +96,8 @@ export default function SessionTerm({ sessionId, senders }) {
     }
   }, [sessionId])
 
-  // copy the terminal's whole text — visible screen plus all retained scrollback — to the clipboard.
-  const copyAll = async () => {
-    const term = termRef.current
-    if (!term) return
-    const buf = term.buffer.active
-    const lines = []
-    for (let i = 0; i < buf.length; i++) lines.push(buf.getLine(i)?.translateToString(true) ?? '')
-    const text = lines.join('\n').replace(/\s+$/, '') + '\n'
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1200)
-    } catch { /* clipboard unavailable (insecure context / denied) */ }
-  }
-
   return (
     <div className="st-wrap">
-      <button type="button" className="st-copy" onClick={copyAll} title="copy terminal contents">
-        {copied ? '✓ copied' : '⧉ copy'}
-      </button>
       <div className="st-host" ref={hostRef} />
     </div>
   )

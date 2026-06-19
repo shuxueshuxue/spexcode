@@ -44,9 +44,7 @@ which would distort xterm's cell measurement mid-animation), and SessionTerm **n
 fit** — it skips any measurement against a near-zero (hidden / unlaid-out) host or an implausibly small col
 count for a clearly-wide host, and **re-fits after the entrance settles** (on `animationend` plus scheduled
 re-fits across the .22s) so the final size locks tmux to the true full width, never a narrow strip. The
-panel clips horizontally; the xterm viewport is the only scrollbar. A small **copy button** floats in each terminal's
-top-right corner: it copies the terminal's whole text — visible screen plus retained scrollback — to the
-clipboard via `navigator.clipboard`, flashing a brief "copied" affordance.
+panel clips horizontally; the xterm viewport is the only scrollbar.
 
 There is exactly **one human input**: the docked `❯` box at the bottom. Submitting it writes the typed
 line **followed by Enter** into the active session's pane over the **same socket the terminal already
@@ -81,9 +79,8 @@ thin POST then a board reload (there is no `review` button — that transition i
 and on container/window resize (sending the new cols×rows only when it changed) while guarding against
 degenerate measurements and re-fitting after the open animation so it reliably fills at full width, and
 wires xterm to the session WebSocket: incoming binary frames are written straight to xterm. It forwards **no** keyboard/mouse;
-instead it registers a `send(text)` writer (raw bytes over the socket) for the bottom box, scrolls via
-xterm's own scrollback (custom wheel handler returns `false`), and renders a top-right **copy** button that
-dumps the full buffer (visible + scrollback) to the clipboard. `SessionWindow.jsx` is the top-right floater of status-dot
+instead it registers a `send(text)` writer (raw bytes over the socket) for the bottom box, and scrolls via
+xterm's own scrollback (custom wheel handler returns `false`). `SessionWindow.jsx` is the top-right floater of status-dot
 rows with a pending-op glyph count, highlighting a worktree's overlays on pick and opening the interface
 on open. All of this renders only what `/api/board` reports — no session logic lives in the dashboard —
 so the raw source (a thin view identical to `spex board`) holds.

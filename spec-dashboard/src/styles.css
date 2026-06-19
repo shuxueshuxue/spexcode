@@ -14,6 +14,7 @@
   --yellow:#b58900;
   --magenta:#d33682;
   --cyan:  #2aa198;
+  --term-bg: #002b36; /* solarized base03 — the embedded terminal is DARK (the Claude TUI is dark-designed) */
   --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 }
 
@@ -395,7 +396,7 @@ body {
 .si-content.is-session .si-term { animation: si-expand .22s ease; }
 .si-term { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 12px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
 .si-term-head { padding: 7px 10px; background: var(--panel2); border-bottom: 1px solid var(--line); color: var(--ink2); display: flex; align-items: center; gap: 7px; font-size: 12px; }
-.si-term-body { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px; background: var(--paper); }
+.si-term-body { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px; background: var(--term-bg); }
 .si-line { font-size: 12px; line-height: 1.6; color: var(--ink2); white-space: pre-wrap; word-break: break-word; }
 .si-line.muted { color: var(--muted); }
 .si-op { color: var(--blue); font-weight: 700; }
@@ -426,12 +427,14 @@ body {
 }
 .st-wrap:hover .st-copy { opacity: .8; }
 .st-copy:hover { opacity: 1; }
+/* DARK terminal background (matches SessionTerm's xterm theme) so the dark-designed Claude TUI renders as
+   intended — no light gutter/flash around the pane while xterm paints. */
 .st-host .xterm, .st-host .xterm-screen {
-  width: 100% !important; height: 100% !important; background: var(--paper) !important;
+  width: 100% !important; height: 100% !important; background: var(--term-bg) !important;
 }
 .st-host .xterm-viewport {
   width: 100% !important; height: 100% !important; overflow-y: auto !important; overflow-x: hidden !important;
-  background: var(--paper) !important;
+  background: var(--term-bg) !important;
 }
 .si-bottom .si-input { color: var(--ink2); }
 

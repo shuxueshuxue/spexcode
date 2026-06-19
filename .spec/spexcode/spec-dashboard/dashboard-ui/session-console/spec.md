@@ -35,7 +35,11 @@ written straight to xterm with **no clear**, and the client sends only a single 
 typed. **No keystrokes or mouse are forwarded from the terminal itself.** Because nothing types into the
 view, scrolling it can never block input: **xterm owns its own scrollback** and the mouse wheel scrolls
 that viewport natively (SessionTerm returns `false` from a custom wheel handler so tmux's mouse mode can't
-steal the wheel). There is **no snapshot-plus-raw-delta splice** (the old scramble): a newly-joined viewer
+steal the wheel). The pane is **dark** (a solarized-dark xterm theme on a dark background) even though the
+surrounding dashboard is light: the Claude Code TUI running inside is **designed for a dark terminal**, so a
+light pane would clash with its diff-add backgrounds, dim/faint context text, and syntax colors. The whole
+terminal area — xterm, its viewport, and the body it sits in — shares that dark background so no light gutter
+flashes around the pane. There is **no snapshot-plus-raw-delta splice** (the old scramble): a newly-joined viewer
 is seeded once with the current screen and then streams live from the same coherent client. The terminal
 **scales to its panel** — the FitAddon fits xterm to the container and each fit sends the new cols×rows
 over the socket so tmux re-renders at exactly that size (only when it changed). The fit is **robust against

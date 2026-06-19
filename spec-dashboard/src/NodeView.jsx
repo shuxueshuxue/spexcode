@@ -63,11 +63,12 @@ function SpecBody({ body }) {
   return <div className="doc-body">{out}</div>
 }
 
-// @@@ ThreePart - render the body as the three labelled parts the backend parses (node.parts):
-//   raw source (human, needs approval) · expanded spec (agent, must match raw) · current state (agent,
-//   split into a `description` of what the code does now and a `verdict` that code & spec aren't
-//   drifted). Each part is a card with an owner badge so the reader sees WHO owns it and how stable it
-//   is. Legacy bodies (parts === null) fall back to the whole-body SpecBody in SpecPane.
+// @@@ TwoPart - render the body as the two labelled parts the backend parses (node.parts):
+//   raw source (human, needs approval) · expanded spec (agent, must match raw). Each part is a card
+//   with an owner badge so the reader sees WHO owns it and how stable it is. There is deliberately NO
+//   agent-authored "current state" card — what's-done is DERIVED (the status/version/drift in the meta
+//   line), never narrated, because agents hallucinate completion. Legacy bodies (parts === null) fall
+//   back to the whole-body SpecBody in SpecPane.
 function PartCard({ kind, title, owner, note, children }) {
   return (
     <section className={`spec-part part-${kind}`}>
@@ -80,7 +81,7 @@ function PartCard({ kind, title, owner, note, children }) {
     </section>
   )
 }
-function ThreePart({ parts }) {
+function TwoPart({ parts }) {
   return (
     <div className="spec-parts">
       <PartCard kind="raw" title="raw source" owner="human" note="rarely changed · needs approval">
@@ -88,16 +89,6 @@ function ThreePart({ parts }) {
       </PartCard>
       <PartCard kind="expanded" title="expanded spec" owner="agent" note="versioned often · must match raw source">
         <SpecBody body={parts.expandedSpec} />
-      </PartCard>
-      <PartCard kind="state" title="current state" owner="agent" note="what the code does now">
-        <div className="cs-sub">
-          <h5 className="cs-label">description</h5>
-          <SpecBody body={parts.currentState.description} />
-        </div>
-        <div className="cs-sub">
-          <h5 className="cs-label">verdict — not drifted</h5>
-          <SpecBody body={parts.currentState.verdict} />
-        </div>
       </PartCard>
     </div>
   )
@@ -117,7 +108,7 @@ function SpecPane({ node }) {
           {node.code.map((f) => <code key={f} className="doc-code-f">{f}</code>)}
         </div>
       )}
-      {node.parts ? <ThreePart parts={node.parts} /> : <SpecBody body={node.body} />}
+      {node.parts ? <TwoPart parts={node.parts} /> : <SpecBody body={node.body} />}
     </div>
   )
 }

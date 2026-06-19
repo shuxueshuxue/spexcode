@@ -7,6 +7,7 @@ code:
   - spec-dashboard/src/SessionInterface.jsx
   - spec-dashboard/src/SessionWindow.jsx
   - spec-dashboard/src/SessionTerm.jsx
+  - spec-dashboard/src/session.js
 ---
 
 # session-console
@@ -134,5 +135,8 @@ xterm's own scrollback (custom wheel handler returns `false`). It enables **forc
 modifier+drag selects text locally despite the app's mouse tracking, and a host-level `⌘`/`Ctrl`+C copies
 `term.getSelection()` to the clipboard (no stdin re-enabled). `SessionWindow.jsx` is the top-right floater of status-dot
 rows with a pending-op glyph count, highlighting a worktree's overlays on pick and opening the interface
-on open. All of this renders only what `/api/board` reports — no session logic lives in the dashboard —
-so the raw source (a thin view identical to `spex board`) holds.
+on open. The window and the interface share their session-view primitives from `session.js` — the
+status→dot-colour map (`STATUS_DOT`) and the `node || title || branch || id` display name (`sessionName`) —
+so a session reads the same colour and label on every surface from one definition. All of this renders only
+what `/api/board` reports — no session logic lives in the dashboard — so the raw source (a thin view
+identical to `spex board`) holds.

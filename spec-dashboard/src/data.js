@@ -89,16 +89,6 @@ function layout(nodes) {
   return pos
 }
 
-// @@@ loadSpecs - the tree comes from the backend (spec-cli reads .spec + git history); every field,
-// including the A->B `evidence` links, is served from there. The only thing decorated client-side is
-// the x/y tidy-tree layout, which is a pure view concern (the backend has no notion of pixels).
-export async function loadSpecs() {
-  const res = await fetch('/api/specs')
-  const nodes = await res.json()
-  const pos = layout(nodes)
-  return nodes.map((n) => ({ ...n, ...pos[n.id] }))
-}
-
 // @@@ loadBoard - THIN wrapper. The board (merged tree + overlay + ghosts + sessions) is assembled by
 // the backend `buildBoard()` and served at /api/board — the SAME data `spex board` prints, so human and
 // agent share one source of truth. The only thing decorated client-side is the x/y tidy-tree layout, a

@@ -41,9 +41,10 @@ one must not mean inventing a new surface.
   `localStorage` and overrides detection permanently until cleared.
 - **Live switching.** Picking a language re-renders every `t()` immediately — the choice flows through
   React context, no reload.
-- **The settings popup** opens on a hotkey that collides with no existing binding, reuses the legend
-  modal's chrome and contract (centered, backdrop-click / `×` / `Esc` close, owns the keys while open),
-  and is the single home for future settings. Today it owns the language picker.
+- **The settings popup** opens on a hotkey that collides with no existing binding, renders in the shared
+  `Modal` chrome (the same centered backdrop / titled header / `×` / `Esc`-close component the
+  help/legend uses — see [[node-graph]]), owns the keys while open, and is the single home for future
+  settings. Today it owns the language picker.
 
 ### the hotkey
 

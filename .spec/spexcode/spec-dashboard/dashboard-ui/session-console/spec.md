@@ -23,7 +23,13 @@ same sessions through the CLI see identical state. The dashboard never invents s
 The interface is two panes: a left session list and a right content area that **morphs** by what's
 focused. "New Session" shows a centered avatar + input, prefilled with the focus node as an editable
 `@node` reference (a convenience — a session may touch any nodes, so the prefix is deletable); launching
-switches to the new session. An existing session shows its **live tmux terminal** (SessionTerm) — a
+switches to the new session. Typing `@` in that prompt opens an **@-mention completion**: a dropdown of
+spec nodes filtered by what follows it, **matched against the node's id and its spec path** (so a partial
+path like `@spec-cli` surfaces a whole subtree, not just an id), best matches first. Picking one (↑/↓ then
+⏎/⇥, or click) drops a clean `@<id>` token in place of the partial. It is a deliberately narrow,
+keyboard-first affordance: the menu opens only on an `@` that **begins a word** (never mid-token, so an
+email address can't trigger it), owns ↑/↓/⏎/⇥/Esc while open, and closes once the token is complete or the
+caret leaves it. It is pure assistance — the reference is still just text the human can edit or delete. An existing session shows its **live tmux terminal** (SessionTerm) — a
 **read-only view** — with the **single human input** docked at the bottom.
 
 The terminal is a **real tmux client**, not an output tap, but it is a **pure scrollable view**: the
@@ -76,7 +82,9 @@ active one shown — over the offline relaunch panel when the active session is 
 textarea's Enter is the **only** input, pushing the line + Enter through the active terminal's registered
 socket writer (`sendersRef`), with `POST /api/sessions/:id/keys` as the not-yet-connected fallback. The
 header buttons map to the session's status (relaunch / merge / back-to-working / close), each a
-thin POST then a board reload (there is no `review` button — that transition is agent-proposed, not human). A window-level capture listener owns `↑`/`↓` list movement and Enter-on-New.
+thin POST then a board reload (there is no `review` button — that transition is agent-proposed, not human). A window-level capture listener owns `↑`/`↓` list movement and Enter-on-New; while it is open the
+interface owns **all** its keys — the board delegates `Esc` to it, which the @-mention menu claims to
+dismiss itself before it falls through to closing the interface.
 `SessionTerm.jsx` opens a **read-only** (`disableStdin`) FitAddon-sized xterm, fits it to the panel on open
 and on container/window resize (sending the new cols×rows only when it changed) while guarding against
 degenerate measurements and re-fitting after the open animation so it reliably fills at full width, and

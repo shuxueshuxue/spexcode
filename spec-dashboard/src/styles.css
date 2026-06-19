@@ -380,9 +380,33 @@ body {
 .si-avatar { font-size: 30px; color: var(--blue); letter-spacing: 2px; }
 .si-ask { font-size: 15px; color: var(--ink2); }
 .si-inputwrap {
+  position: relative;
   width: 100%; display: flex; border: 1px solid var(--blue); border-radius: 6px;
   background: var(--panel); padding: 10px 12px;
 }
+
+/* @@@ @-mention dropdown - bare terminal completion list: square corners, hairline border, monospace
+   rows of `@id` + dim spec path. Anchored just under the input; one row is highlighted (keyboard/hover). */
+.mention-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 5;
+  margin: 0; padding: 4px; list-style: none; max-height: 248px; overflow-y: auto;
+  background: var(--paper); border: 1px solid var(--blue); border-radius: 4px;
+  box-shadow: 0 6px 18px rgba(7, 54, 66, 0.16); animation: si-rise .12s ease;
+}
+.mention-head {
+  padding: 3px 8px 5px; font-size: 10.5px; color: var(--muted); letter-spacing: .02em;
+  border-bottom: 1px solid var(--line); margin-bottom: 3px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.mention-item {
+  display: flex; align-items: baseline; gap: 8px; padding: 4px 8px; border-radius: 3px;
+  cursor: pointer; font-size: 12px; white-space: nowrap;
+}
+.mention-item.on { background: var(--panel2); }
+.mention-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; align-self: center; }
+.mention-id { color: var(--blue); flex: none; }
+.mention-id .mention-hit { color: var(--ink2); font-weight: 700; }
+.mention-path { color: var(--muted); font-size: 11px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .si-input {
   flex: 1; min-width: 0; resize: none; background: transparent; border: none; outline: none;
   color: var(--ink2); font-family: var(--mono); font-size: 13px; line-height: 1.5; max-height: 180px;

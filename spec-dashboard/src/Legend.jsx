@@ -1,12 +1,13 @@
+import Modal from './Modal.jsx'
 import { STATUS, GLYPH } from './SpecNode.jsx'
 import { useT } from './i18n/index.jsx'
 
-// @@@ Legend - the single home for the keymap + visual vocabulary, shown as a CENTERED, scrollable
-// modal opened by the HUD's discreet `?` (key or click). It reads STATUS and GLYPH straight from
-// SpecNode.jsx (the node renderer), so the swatches can NEVER drift from what the board actually
-// draws — change a colour or glyph there and the legend follows. All COPY routes through t() (the
-// keys/glyphs themselves are language-neutral and stay literal). The backdrop closes on click; the
-// inner panel stops propagation so clicks inside don't close it. Esc / `?` / × also close (see App).
+// @@@ Legend - the single home for the keymap + visual vocabulary, shown in the shared centered Modal
+// opened by the HUD's discreet `?` (key or click). It reads STATUS and GLYPH straight from SpecNode.jsx
+// (the node renderer), so the swatches can NEVER drift from what the board actually draws — change a
+// colour or glyph there and the legend follows. All COPY routes through t() (the keys/glyphs themselves
+// are language-neutral and stay literal). Modal owns the backdrop/header/close chrome; Esc / `?` / ×
+// close it (see App + Modal).
 
 // keymap key-glyphs are language-neutral; the description for each row is pulled from t() by key.
 const BOARD_KEYS = [
@@ -51,13 +52,7 @@ function KeymapSection({ title, rows, t }) {
 export default function Legend({ onClose }) {
   const t = useT()
   return (
-    <div className="legend-backdrop" onClick={onClose}>
-      <div className="legend" role="dialog" aria-modal="true" aria-label={t('legend.title')} onClick={(e) => e.stopPropagation()}>
-        <div className="legend-head">
-          <span className="legend-title">{t('legend.title')}</span>
-          <button className="legend-close" onClick={onClose} title={t('legend.close')}>×</button>
-        </div>
-        <div className="legend-body">
+    <Modal title={t('legend.title')} closeLabel={t('legend.close')} onClose={onClose}>
           <KeymapSection title={t('legend.secBoard')} rows={BOARD_KEYS} t={t} />
           <KeymapSection title={t('legend.secPopup')} rows={POPUP_KEYS} t={t} />
 
@@ -115,8 +110,6 @@ export default function Legend({ onClose }) {
               <span className="legend-desc">{t('legend.ringGhost')}</span>
             </div>
           </section>
-        </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

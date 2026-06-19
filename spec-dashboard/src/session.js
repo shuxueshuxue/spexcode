@@ -1,0 +1,13 @@
+// @@@ session view helpers - shared by every session surface (the top-right SessionWindow, the Enter
+// SessionInterface, the SessionGraph) so they label and colour a session identically. Previously each
+// surface hand-rolled its own copy of these and they could silently drift.
+
+// session liveness -> dot colour. The SINGLE source for the status dot drawn in the session window, the
+// session list, and the @-mention rows — a session's status reads the same colour wherever it appears.
+export const STATUS_DOT = {
+  working: '#cb4b16', idle: '#93a1a1', offline: '#657b83', review: '#6c71c4', done: '#268bd2',
+  'close-pending': '#cb4b16', blocked: '#2aa198', error: '#dc322f', 'needs-input': '#b58900',
+}
+
+// the human-facing name of a session: its node, else title/branch, else the raw id.
+export const sessionName = (s) => s?.node || s?.title || s?.branch || s?.id

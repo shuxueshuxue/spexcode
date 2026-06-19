@@ -39,6 +39,16 @@
           }
         ]
       }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "p=$(cat); case \"$p\" in *idle_prompt*) /Users/lexicalmathical/specMech/spec-cli/node_modules/.bin/tsx /Users/lexicalmathical/specMech/spec-cli/src/cli.ts session idle ;; esac"
+          }
+        ]
+      }
     ]
   }
 }

@@ -6,10 +6,9 @@
 
 import { Avatar } from './avatar.jsx'
 import { labelColor } from './color.js'
+import { GLYPH } from './SpecNode.jsx'
+import { STATUS_DOT, sessionName } from './session.js'
 import { useT } from './i18n/index.jsx'
-
-const STATUS_DOT = { working: '#cb4b16', idle: '#93a1a1', offline: '#657b83', review: '#6c71c4', done: '#268bd2', 'close-pending': '#cb4b16', blocked: '#2aa198', error: '#dc322f', 'needs-input': '#b58900' }
-const GLYPH = { added: '+', edited: '~', deleted: '✕', moved: '→' }
 
 function opSummary(ops) {
   if (!ops.length) return null
@@ -38,9 +37,9 @@ export default function SessionWindow({ sessions, activeId, onPick, onOpen }) {
               style={{ '--ov': labelColor(s.id) }}
               onClick={() => onPick(s)}
             >
-              <Avatar seed={s.id} status={s.status} title={`${s.node || s.title || s.branch || s.id} · ${t(`status.${s.status}`)} — ${s.id.slice(0, 8)}`} />
+              <Avatar seed={s.id} status={s.status} title={`${sessionName(s)} · ${t(`status.${s.status}`)} — ${s.id.slice(0, 8)}`} />
               <span className="sess-dot" style={{ background: STATUS_DOT[s.status] || '#93a1a1' }} />
-              <span className="sess-id">{s.node || s.title || s.branch || s.id}</span>
+              <span className="sess-id">{sessionName(s)}</span>
               <span className="sess-status">{t(`status.${s.status}`)}</span>
               {ops && <span className="sess-ops">{ops}</span>}
             </button>

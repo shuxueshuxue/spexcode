@@ -9,6 +9,7 @@ code:
   - spec-dashboard/src/avatar.jsx
   - spec-dashboard/src/color.js
   - spec-dashboard/src/Legend.jsx
+  - spec-dashboard/src/Modal.jsx
   - spec-dashboard/src/data.js
   - spec-dashboard/src/styles.css
 ---
@@ -66,7 +67,9 @@ Because this visual vocabulary is dense, a **floating legend** decodes it on dem
 closes). It reads its swatches from the SAME `STATUS`/`GLYPH` constants the nodes render from, so it can never
 drift from the real symbols. `?`/Esc are handled in the graph-mode branch of the capture-phase keydown
 handler, below the modal guards, so the legend never disturbs (or is disturbed by) an open popup or session
-interface.
+interface. The legend and the [[settings]] popup share **one** centered-modal chrome — `Modal.jsx` (backdrop
++ titled header with × close + scrollable body) — so both look and behave identically from a single
+definition rather than two hand-rolled copies.
 
 The board and the session console are **bidirectionally linked**: a node's live editors map to live sessions
 by exact id, so the same overlay that draws Row 2's avatars also drives the `⏎` affordance and Enter →

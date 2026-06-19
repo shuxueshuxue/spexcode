@@ -147,6 +147,12 @@ function settingsArg(): string {
   // so the Stop gate forces a fresh re-declaration. Stop is the BLOCKING gate (declare-before-stop, with
   // a loop-break); StopFailure marks `error`. All run with cwd = the worktree; `spex` is on PATH (npm link).
   const markCmd = `bash ${markActive}`
+  // PATH-independent spex: a fresh worktree has no node_modules and `spex` may be absent from the
+  // session's shell PATH, so invoke MAIN's tsx + cli by absolute path. Passed to the gate via $SPEX so
+  // its auto-default AND the declare instruction it shows the agent both work without PATH.
+  const tsx = join(mainRoot(), 'spec-cli', 'node_modules', '.bin', 'tsx')
+  const cli = join(mainRoot(), 'spec-cli', 'src', 'cli.ts')
+  const spex = `${tsx} ${cli}`
   const settings = JSON.stringify({
     hooks: {
       // UserPromptSubmit: instant feedback — a submitted prompt flips the session to `active` right away
@@ -154,8 +160,8 @@ function settingsArg(): string {
       // misses (background-resume, non-turn-start wakeups). Both just mark active; together = robust.
       UserPromptSubmit: [{ hooks: [{ type: 'command', command: markCmd }] }],
       PreToolUse: [{ hooks: [{ type: 'command', command: markCmd }] }],
-      Stop: [{ hooks: [{ type: 'command', command: `bash ${gate}` }] }],
-      StopFailure: [{ hooks: [{ type: 'command', command: 'spex session fail' }] }],
+      Stop: [{ hooks: [{ type: 'command', command: `SPEX='${spex}' bash ${gate}` }] }],
+      StopFailure: [{ hooks: [{ type: 'command', command: `${spex} session fail` }] }],
     },
   })
   return `--settings '${settings}'`

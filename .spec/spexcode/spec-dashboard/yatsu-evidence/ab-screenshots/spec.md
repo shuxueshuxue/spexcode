@@ -4,8 +4,6 @@ status: active
 session: sess-b412
 hue: 45
 desc: A→B proof frames are backend-served metadata links, shown in the recent tab; with none yet, the slot falls back to the spec's own latest line diff.
-code:
-  - spec-dashboard/src/NodeView.jsx
 ---
 # ab-screenshots
 
@@ -31,3 +29,10 @@ node reparented since (a pure rename, not itself a version) still shows the righ
 renders only the hunk body — adds/dels coloured, file-header metadata dropped — and falls back to an honest
 "no recorded change yet" line for a node with no committed version. The proof surface stays the same
 `RecentPane` figure either way; what fills it (screenshots vs. diff) is the only thing that differs.
+
+This node governs **no source of its own**. Its rendering surface, `RecentPane`, is part of `NodeView.jsx`,
+owned by [[work-pane]] (the node popup); the line-diff fallback is served by `/api/specs/:id/diff` — the
+route in [[spec-cli]], the git-derived patch in [[source-of-truth]]; the `evidence` field is backend
+metadata; and the real A→B captures arrive only with the yatsu package (pending). So ab-screenshots is the
+proof *contract* — what fills the slot and where it shows — and stays code-less until yatsu records the
+first frames, rather than co-claiming the popup file and reading its churn as phantom drift.

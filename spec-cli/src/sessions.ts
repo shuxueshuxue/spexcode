@@ -210,17 +210,41 @@ const SHELLISH = /^-?(zsh|bash|sh|fish|dash)$/  // pane sitting at a shell = cla
 async function paneCmd(id: string): Promise<string> {
   try { return (await tmux(['display-message', '-p', '-t', id, '-F', '#{pane_current_command}'])).trim() } catch { return '' }
 }
-async function reconcile(rec: SessRec): Promise<DisplayStatus> {
-  // Declarations win over liveness, in ONE path: awaiting maps to its proposal label; blocked / error /
-  // needs-input map straight to themselves. We never INFER any of these externally.
+
+// @@@ paneSnapshot - liveness for the WHOLE session list in ONE tmux call. reconcile used to spawn two
+// tmux per session (has-session + display-message), so listing N sessions was 2N spawns — the dominant
+// /api/sessions cost under multi-agent load. `tmux list-panes -a` returns every pane on our socket at
+// once; we key it by session_name → that session's pane command. A session present in the map is alive;
+// its command tells working from crashed (a bare shell = claude exited). We keep the ACTIVE pane's command
+// (our sessions are single-pane, but be robust). tmux server down / no sessions → empty map → everything
+// reconciles to offline, which is correct. Tab-separated because neither a session id (uuid) nor a
+// pane_current_command (a process comm) contains a tab. The per-session alive()/paneCmd() above stay for
+// the single-session ops (reopen/capture/rawkey) that don't want a full snapshot.
+async function paneSnapshot(): Promise<Map<string, string>> {
+  const m = new Map<string, string>()
+  let out = ''
+  try { out = await tmux(['list-panes', '-a', '-F', '#{session_name}\t#{pane_active}\t#{pane_current_command}']) } catch { return m }
+  for (const line of out.split('\n')) {
+    if (!line) continue
+    const [name, active, ...rest] = line.split('\t')
+    if (!name) continue
+    if (active === '1' || !m.has(name)) m.set(name, rest.join('\t').trim())  // prefer the active pane
+  }
+  return m
+}
+
+// reconcile the SHOWN status from a session's declared state + a prebuilt liveness snapshot (no per-call
+// tmux spawn — see paneSnapshot). Declarations win over liveness, in ONE path: awaiting maps to its
+// proposal label; blocked / error / needs-input map straight to themselves. We never INFER those externally.
+function reconcile(rec: SessRec, panes: Map<string, string>): DisplayStatus {
   if (rec.status === 'awaiting') return PROPOSAL_STATUS[rec.proposal || 'nothing']
   if (rec.status !== 'active' && rec.status !== 'idle') return rec.status  // blocked | error | needs-input
   // active/idle are the SAME live agent — claude is the pane's foreground process whether it is churning
-  // OR waiting at its prompt — so they share ONE liveness check: a dead tmux or a bare-shell pane (claude
-  // exited/crashed) is offline; else idle if the idle_prompt hook fired since the last tool, else working.
-  // The mark-active hook flips idle → active on the next real work, so this stays self-correcting.
-  if (!rec.session || !(await alive(rec.session))) return 'offline'
-  if (SHELLISH.test(await paneCmd(rec.session))) return 'offline'
+  // OR waiting at its prompt — so they share ONE liveness check: a dead tmux (no pane for the id) or a
+  // bare-shell pane (claude exited/crashed) is offline; else idle if the idle_prompt hook fired since the
+  // last tool, else working. The mark-active hook flips idle → active on the next real work, self-correcting.
+  if (!rec.session || !panes.has(rec.session)) return 'offline'
+  if (SHELLISH.test(panes.get(rec.session)!)) return 'offline'
   return rec.status === 'idle' ? 'idle' : 'working'
 }
 
@@ -246,11 +270,14 @@ export async function sessionPrompt(id: string): Promise<string | null> {
 // @@@ listSessions - every worktree that IS a session (has a .session id), status reconciled. Offline
 // and awaiting ones still appear (their .session persists), so a session is never lost from view.
 export async function listSessions(): Promise<Session[]> {
+  // ONE worktree enumeration + ONE tmux liveness snapshot for the whole list (both independent), then
+  // every session reconciles by a pure map lookup — no per-session tmux spawn.
+  const [wts, panes] = await Promise.all([listWorktrees(), paneSnapshot()])
   const out: Session[] = []
-  for (const w of await listWorktrees()) {
+  for (const w of wts) {
     const rec = readSessionFile(w.path)
     if (!rec.session) continue
-    out.push(toSession(rec, w.branch, w.path, await reconcile(rec)))
+    out.push(toSession(rec, w.branch, w.path, reconcile(rec, panes)))
   }
   return out
 }

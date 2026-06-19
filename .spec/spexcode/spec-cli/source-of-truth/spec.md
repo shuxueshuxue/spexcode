@@ -44,6 +44,22 @@ fetch their independent indexes in parallel.
 Arbitrary non-`.spec` files (the governed *code* paths `spex lint` checks) keep the per-file `--follow`
 path, since the bulk index only covers `.spec`.
 
+The same discipline — warm-cached/batched, keyed on real change, read from the filesystem not a
+subprocess, never stale — now governs the **runtime reads** the dashboard makes alongside the spec data,
+so `/api/board`, `/api/layout`, and `/api/sessions` scale like `/api/specs` instead of spawning a
+git/tmux process per worktree or per session. The board **overlay** (each managed worktree's pending
+spec-delta vs main, owned by [[portable-layout]]) is a pure function of main's HEAD, the worktree's HEAD,
+and that worktree's `.spec` working-tree state, so it is memoized per worktree on a key read **entirely
+from the filesystem** — `headSha` for the two HEADs plus `worktreeSpecSig` (a stat-only fingerprint of
+the worktree's `.spec`: every file's path + mtime + size, so an edit, add, delete, or reparent moves the
+key). The three-`git diff` delta re-runs only when that key moves (a commit, a spec edit, a new or closed
+session), so a warm `/api/layout` spawns just the one `git worktree list`, yet a new commit or a new
+untracked spec.md still reflects at once; an unreadable HEAD fails loud (bypass the cache and recompute,
+never serve a delta keyed on an empty sha). Session liveness ([[sessions]]) takes the same turn away from
+per-item spawning: one batched `tmux list-panes -a` snapshots every session's pane in a single call,
+replacing the two tmux spawns per session, with the snapshot rebuilt every read so liveness is never
+stale. `buildBoard` simply composes these already-cached/batched sources.
+
 Status is a four-state derived value (`deriveStatus`), computed from version + drift, with frontmatter
 kept only as a fallback when git is unreadable. `loadSpecs` derives the git-only part
 (pending/drift/merged); the live `active` state, which needs the worktree overlay, is layered on by the

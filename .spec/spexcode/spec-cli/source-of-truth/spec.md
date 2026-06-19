@@ -27,7 +27,14 @@ To scale with history rather than node count, the aggregator walks the whole `.s
 **single `git log` pass** (`historyIndex` in `git.ts`), bucketing every commit's rows by each file's
 current path and following reparent renames backward in-memory — so a moved node still reads as one
 continuous history and a pure move never counts as a version. The result is cached on `HEAD`
-(committed history is immutable, so a warm read is one `rev-parse`). This replaces the old per-node
+(committed history is immutable). The cache key — the current commit sha — is read **straight from the
+filesystem** (`headSha`: `.git/HEAD` plus the ref it names), never from a `git rev-parse` subprocess: the
+key is checked on every warm read, so spawning git just to confirm "`HEAD` hasn't moved" made a warm
+`loadSpecs` pay two subprocess spawns (~150ms) for data it already held. A filesystem read is sub-ms, so
+a warm read spawns **no git at all**; the heavy walk runs only on a miss, after a real commit. The key
+stays strictly `HEAD`-derived (no TTL): a new commit rewrites `HEAD`/the loose ref, the sha changes, the
+cache misses, the board reflects the new version/drift at once. If the sha can't be read the cache is
+bypassed (recompute), never served stale. This replaces the old per-node
 `git log --follow` (`O(nodes × commits)`); `loadSpecs` now does one walk regardless of node count.
 Every git read on the serving path goes through the **async** helper (`gitA`), never the sync `git()`:
 synchronous `execFileSync` spawns via `fork()`, whose cost scales with the API server's resident memory,

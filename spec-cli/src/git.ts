@@ -1,5 +1,7 @@
 import { execFileSync, execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { readFileSync, statSync, existsSync } from 'node:fs'
+import { join, isAbsolute, resolve } from 'node:path'
 
 // @@@ git is the database - a spec's version history IS the git log of its spec.md.
 // %s (subject) = the reason for change; a `Session:` trailer = the attribution.
@@ -40,6 +42,54 @@ export function repoRoot(): string {
     repoRootCache = process.cwd()
   }
   return repoRootCache
+}
+
+// @@@ headSha - the current HEAD commit sha read straight from the filesystem, NO git subprocess.
+// This is the cache key for the HEAD-keyed indexes below, hit on EVERY warm read. Using
+// `git rev-parse HEAD` for it cost a full subprocess spawn (~70ms here — fork()/exec on the
+// server's RSS), so a warm /api/specs paid ~2 spawns just to confirm "HEAD hasn't moved" before
+// returning cached data. Reading `.git/HEAD` + the ref it points at is a couple of sub-ms file reads,
+// so a warm hit spawns NO git at all. Strictly HEAD-derived (no TTL): a new commit rewrites HEAD/the
+// loose ref, the sha changes, the cache misses, we recompute — staleness is impossible. THROWS if the
+// sha can't be resolved; callers must then recompute (never serve a cache they can't validate).
+function gitDirOf(root: string): string {
+  // a normal checkout has a `.git` DIRECTORY; a linked worktree has a `.git` FILE: `gitdir: <path>`.
+  const dotgit = join(root, '.git')
+  if (statSync(dotgit).isDirectory()) return dotgit
+  const m = readFileSync(dotgit, 'utf8').match(/^gitdir:\s*(.+)$/m)
+  if (!m) throw new Error(`headSha: unparseable .git file at ${dotgit}`)
+  const dir = m[1].trim()
+  return isAbsolute(dir) ? dir : resolve(root, dir)
+}
+function commonDirOf(gitDir: string): string {
+  // a worktree's gitdir holds per-worktree state (HEAD); SHARED refs (refs/heads/*, packed-refs) live
+  // in the common dir, named by the `commondir` pointer. A plain checkout IS its own common dir.
+  const p = join(gitDir, 'commondir')
+  if (!existsSync(p)) return gitDir
+  const c = readFileSync(p, 'utf8').trim()
+  return isAbsolute(c) ? c : resolve(gitDir, c)
+}
+export function headSha(root: string): string {
+  const gitDir = gitDirOf(root)
+  const head = readFileSync(join(gitDir, 'HEAD'), 'utf8').trim()
+  const ref = head.match(/^ref:\s*(.+)$/)
+  if (!ref) return head // detached HEAD: the file already holds the sha
+  const name = ref[1].trim()
+  // a loose ref wins over packed; per-worktree HEAD points at a branch whose ref lives in the common dir.
+  const looseWt = join(gitDir, name)
+  if (existsSync(looseWt)) return readFileSync(looseWt, 'utf8').trim()
+  const common = commonDirOf(gitDir)
+  const loose = join(common, name)
+  if (existsSync(loose)) return readFileSync(loose, 'utf8').trim()
+  const packed = join(common, 'packed-refs')
+  if (existsSync(packed)) {
+    for (const line of readFileSync(packed, 'utf8').split('\n')) {
+      if (!line || line[0] === '#' || line[0] === '^') continue
+      const sp = line.indexOf(' ')
+      if (sp > 0 && line.slice(sp + 1).trim() === name) return line.slice(0, sp).trim()
+    }
+  }
+  throw new Error(`headSha: cannot resolve ${name}`)
 }
 
 export type Version = { hash: string; date: string; reason: string; session: string | null }
@@ -119,18 +169,31 @@ let indexCache: { head: string; idx: HistoryIndex } | null = null
 // detection, so loading every node was O(nodes × commits) — measurably quadratic (≈0.6s at 19 nodes,
 // ~20s at 100, ~5min at 500). Here we walk history once, read every commit's spec.md numstat + rename
 // status, and bucket rows by each file's CURRENT (head) path, following renames BACKWARD in-memory.
-// Cached on HEAD: a node's committed history is immutable, so a warm hit costs just one rev-parse.
-// @@@ async git on the serving path - rev-parse/buildIndex go through gitA (async), NOT sync git().
-// execFileSync spawns via fork(), whose cost scales with the PARENT process's resident memory — in the
-// long-running API server (large RSS) every sync git spawn is slow (~0.5s) and they degrade as RSS
-// grows, so /api/specs and /history took >1s even warm. gitA uses libuv's posix_spawn (no page-table
-// copy), staying flat regardless of RSS. The cache is unchanged: a warm hit is one async rev-parse.
+// Cached on HEAD: a node's committed history is immutable, so a warm hit costs just a HEAD read.
+// @@@ filesystem HEAD key - the cache key comes from headSha() (a couple of file reads), NOT a
+// `git rev-parse HEAD` subprocess. The key is checked on EVERY warm read, so spawning git for it made
+// warm /api/specs cost ~2 spawns (~150ms) purely to confirm HEAD was unchanged. headSha() is sub-ms, so
+// a warm hit now spawns NO git. buildIndex (the MISS path, after a real commit) still uses gitA — async
+// so the one heavy walk stays off the event loop and flat regardless of the server's RSS.
 export async function historyIndex(root: string): Promise<HistoryIndex> {
-  const head = (await gitA(['-C', root, 'rev-parse', 'HEAD'])).trim()
+  const head = headOrEmpty(root)
   if (indexCache && head && indexCache.head === head) return indexCache.idx
   const idx = await buildIndex(root)
   if (head) indexCache = { head, idx }
   return idx
+}
+
+// @@@ headOrEmpty - resolve HEAD for cache-keying, '' if it can't be read. '' fails the
+// `cache.head === head` test, so we fall through to a recompute rather than serve a cache we can't
+// validate (the contract: never serve possibly-stale data). The first failure warns once so a broken
+// key surfaces loudly instead of silently degrading every read into a full rebuild.
+let headWarned = false
+function headOrEmpty(root: string): string {
+  try { return headSha(root) }
+  catch (e) {
+    if (!headWarned) { headWarned = true; console.warn(`spec-cli: headSha failed, recomputing every read: ${(e as Error).message}`) }
+    return ''
+  }
 }
 
 async function buildIndex(root: string): Promise<HistoryIndex> {
@@ -290,8 +353,8 @@ async function buildDriftIndex(root: string): Promise<DriftIndex> {
   return { pos, fileCommits, acks, specNodes }
 }
 export async function driftIndex(root: string): Promise<DriftIndex> {
-  const head = (await gitA(['-C', root, 'rev-parse', 'HEAD'])).trim()
-  if (driftIdxCache && driftIdxCache.head === head) return driftIdxCache.idx
+  const head = headOrEmpty(root) // filesystem HEAD, no subprocess — see historyIndex
+  if (driftIdxCache && head && driftIdxCache.head === head) return driftIdxCache.idx
   const idx = await buildDriftIndex(root)
   if (head) driftIdxCache = { head, idx }
   return idx

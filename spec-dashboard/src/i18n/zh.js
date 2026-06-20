@@ -170,6 +170,7 @@ export default {
     navExit: '点击退出导航模式',
     msgOffline: '重新启动以向此会话发送消息',
     msgPlaceholder: '向此会话发送消息 · ⏎ 发送',
+    msgError: '⚠ 未送达 — 重试',
   },
 
   settings: {

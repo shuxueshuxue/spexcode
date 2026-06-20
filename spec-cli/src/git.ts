@@ -31,6 +31,21 @@ export async function gitA(args: string[]): Promise<string> {
   } catch { return '' }
 }
 
+// @@@ gitTry - run git for a MUTATING op where the exit code IS the verdict (merge, merge --abort, …).
+// Unlike gitA (reads — hides failure as '') this NEVER swallows a failure: the caller gets ok + stderr and
+// can act on / surface the real reason (fail-loud). Same env-stripping as git()/gitA() so a hook's exported
+// GIT_DIR can't misdirect the op. execFile rejects on a non-zero exit with stdout/stderr on the error.
+export async function gitTry(args: string[]): Promise<{ ok: boolean; stdout: string; stderr: string }> {
+  const env = { ...process.env }
+  delete env.GIT_DIR; delete env.GIT_WORK_TREE; delete env.GIT_INDEX_FILE; delete env.GIT_OBJECT_DIRECTORY
+  try {
+    const { stdout, stderr } = await pexecFile('git', args, { encoding: 'utf8', env, maxBuffer: 1 << 24 })
+    return { ok: true, stdout, stderr }
+  } catch (e: any) {
+    return { ok: false, stdout: e?.stdout ?? '', stderr: e?.stderr ?? String(e?.message ?? e) }
+  }
+}
+
 // memoized: the repo root is constant for a process, but resolveLayout() calls this per request — without
 // the cache that's a sync `git` fork() on every /api/layout & /api/board (slow on the server's big RSS).
 let repoRootCache: string | null = null
@@ -498,11 +513,12 @@ export function mergeConflicts(wtPath: string, mainRef = 'main'): Promise<boolea
 // the fork point means main's post-fork commits live on main's side of the merge-base and never enter the
 // diff, so staleness registers as nothing — while EVERY genuine worktree change (committed on the branch
 // AND uncommitted/dirty, distinction preserved) still appears, since those live on the worktree's side.
-export async function worktreeSpecDelta(wtPath: string, mainRef: string): Promise<NodeOp[]> {
+export async function worktreeSpecDelta(wtPath: string, mainRef: string, baseHint?: string): Promise<NodeOp[]> {
   const run = (args: string[]) => gitA(['-C', wtPath, '-c', 'core.quotePath=false', ...args])
   // fork point = where this worktree branched from main; '' (no common ancestor / unreadable ref) falls
-  // back to mainRef so we still surface changes rather than going silent.
-  const base = (await run(['merge-base', mainRef, 'HEAD'])).trim() || mainRef
+  // back to mainRef so we still surface changes rather than going silent. The caller (cachedDelta) already
+  // computes this same merge-base to key its cache, so it passes it in to avoid a redundant subprocess.
+  const base = baseHint || (await run(['merge-base', mainRef, 'HEAD'])).trim() || mainRef
   // the three queries are independent — run them in parallel.
   const [workOut, commOut, statusOut] = await Promise.all([
     run(['diff', '--name-status', '-M', base, '--', '.spec']),

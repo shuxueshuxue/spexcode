@@ -691,6 +691,29 @@ export function superviseQueue(intervalMs = 3000): void {
   void tick()
 }
 
+// @@@ createSession (dispatch via backend) - `spex new` / `spex session new` must launch the worker in the
+// BACKEND's process, not the caller's. The backend owns the launch env (notably SPEXCODE_CLAUDE_CMD, which
+// reclaude strips from agent envs) AND the concurrency cap. An agent that runs `spex new` (e.g. a supervisor)
+// has a stripped env, so an in-process launch would spawn workers under plain `claude` and 401 at boot. So
+// the CLI POSTs to the running backend whenever one answers, making the backend the single owner of session
+// launching. Only when NO backend is reachable do we fall back to launching in this process (with a stderr
+// warning) — the backend's own POST handler calls newSession directly, so it never re-enters this path.
+export async function createSession(node: string | null, prompt: string): Promise<Session> {
+  let res: Response
+  try {
+    res = await fetch(`${apiBase()}/api/sessions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ node, prompt }),
+    })
+  } catch {
+    console.error('spex: no backend reachable — launching in-process (caller env owns auth, no concurrency cap)')
+    return newSession(node, prompt)
+  }
+  if (!res.ok) throw new Error(`backend rejected session (${res.status}): ${await res.text().catch(() => '')}`)
+  return await res.json() as Session
+}
+
 // @@@ newSession - durable worktree (branch node/<slug> off main) + .session label. The agent does NOT
 // launch inline any more: the worktree is prepared and parked as `queued`, then drainQueue() launches it
 // immediately if we're under the concurrency cap, else it waits its turn. Backs both the dashboard POST and

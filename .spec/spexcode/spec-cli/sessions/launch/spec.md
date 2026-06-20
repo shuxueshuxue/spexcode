@@ -13,7 +13,9 @@ code:
 
 Launching a worker must be **whole and bounded**: the launch prompt arrives complete (never truncated by
 the transport), a dispatched agent does **not** silently inherit the project `CLAUDE.md`, and no launch
-ever crashes the box — past the concurrency cap a launch **waits its turn** instead of running.
+ever crashes the box — past the concurrency cap a launch **waits its turn** instead of running. And
+launching has a **single owner**: the running backend process, never whichever shell happened to type
+`spex new` — because the launch env (and the cap) live in the backend, not in the caller.
 
 ## expanded spec
 
@@ -47,6 +49,13 @@ scripts (`stop-gate.sh`, `mark-active.sh`), the `tsx` runner, and `cli.ts` — r
 package's **own** on-disk location (derived from the running module's URL), never from a hardcoded
 `<repoRoot>/spec-cli`. Renaming or relocating the package therefore can't break a launch, and no config
 knob is introduced for it.
+
+**The backend is the single launch owner.** `spex new` / `spex session new` **POST to the running
+backend** rather than launching in their own process, so the launch always runs where the launch env and
+the cap live. This matters because the caller can be **another agent** — a supervisor running `spex new` —
+whose env has been stripped of `SPEXCODE_CLAUDE_CMD`, so an in-process launch from there spawns bare-`claude`
+workers that **401 at boot**. The CLI falls back to in-process **only when no backend answers**, warning
+that the launch then carries the caller's env and skips the cap.
 
 ### Concurrency cap (bounded working set)
 

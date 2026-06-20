@@ -2,7 +2,7 @@
 title: graph
 status: active
 hue: 280
-desc: The live session-monitor network — edge A→B iff A runs `spex watch B` — and the `spex watch` event stream.
+desc: The live session-monitor network — edge A→B iff A runs `spex watch B` — and the `spex watch` stream / `spex wait` one-shot.
 code:
   - spec-cli/src/sessions.ts
 ---
@@ -42,3 +42,15 @@ emits each actionable transition (review / done / close-pending / offline / erro
 removal (`closed`). The net feed is `launched → [actionable transitions] → closed` — a true "subscribe
 to all session changes" stream for a super-manager, where each watch process is one subscriber and the
 selector is the subscription.
+
+### `spex wait` — the one-shot blocking wait
+
+`spex wait <id> [STATUS]` (`waitForSession`) is the **blocking counterpart** to the streaming watch: an
+agent or supervisor that wants to "wait for a worker" needs a call that **returns**, because `spex watch`
+streams forever and never exits — blocking on it hangs the caller's whole turn. `wait` reuses the same
+board poll and selector matcher, and **exits the moment** `<id>` reaches an **actionable** status — the
+default set (`review`, `needs-input`, `error`, `done`, `close-pending`, `blocked`), or the single STATUS
+if the caller named one — printing that status. It is **bounded**: a `--timeout` (default 20 min) caps
+the wait and exits non-zero, so it can never wedge a turn; an unknown or already-closed id is terminal
+(it can never reach the target) and exits non-zero too. Only the actionable set differs from watch's —
+`wait` answers "tell me when this one worker needs me", where watch answers "stream everything".

@@ -10,7 +10,7 @@ function flag(name: string): string | undefined {
 }
 const has = (name: string) => process.argv.includes(`--${name}`)
 // bare positionals after argv index `from`, skipping flags and their values (selectors for ls/watch).
-const VALUE_FLAGS = new Set(['--status', '--as', '--interval', '--propose', '--note', '--node', '--prompt'])
+const VALUE_FLAGS = new Set(['--status', '--as', '--interval', '--propose', '--note', '--node', '--prompt', '--timeout'])
 function positionals(from: number): string[] {
   const out: string[] = []
   for (let i = from; i < process.argv.length; i++) {
@@ -40,6 +40,7 @@ Specs / graph
 Sessions
   ls [SEL…]             living-sessions table          [--status a,b] [--json]
   watch [SEL…]          stream actionable transitions  [--as NAME] [--status a,b] [--idle] [--interval N]
+  wait <id> [STATUS]    block until <id> hits an actionable status, print it, exit  [--timeout S] [--interval S]
   new "<prompt>"        start a session (= session new)  [--node X]
   session <sub>         new | list | reopen | review | done | merge | close | send | capture | prompt
   session prompt <id>   print the session's originating prompt (what it was asked to do)
@@ -150,6 +151,25 @@ if (cmd === 'serve') {
     as: flag('as'),
     intervalMs,
   })
+} else if (cmd === 'wait') {
+  // @@@ wait - the ONE-SHOT blocking wait an agent/supervisor needs (contrast `watch`, which STREAMS
+  // forever and never exits — blocking on it to "wait for a worker" hangs the whole turn). Reuses the
+  // board poll and EXITS on the first time <id> reaches an actionable status (the default set, or the
+  // specific STATUS positional if given), printing that status. --timeout (seconds, default 1200 = 20min)
+  // caps the wait and exits non-zero so it can never hang forever; an unknown/closed id exits 2.
+  const { waitForSession, STATUS_GLYPH } = await import('./sessions.js')
+  const [id, status] = positionals(3)
+  if (!id) { console.error('usage: spex wait <id> [<status>] [--timeout SECONDS] [--interval SECONDS]'); process.exit(2) }
+  if (status && !(status in STATUS_GLYPH)) {
+    console.error(`spex wait: unknown status '${status}' (one of: ${Object.keys(STATUS_GLYPH).join(', ')})`); process.exit(2)
+  }
+  const timeoutMs = (Number(flag('timeout')) || 1200) * 1000
+  const intervalMs = (Number(flag('interval')) || 2) * 1000
+  const r = await waitForSession(id, { status, timeoutMs, intervalMs })
+  if ('status' in r) { console.log(r.status); process.exit(0) }
+  if ('gone' in r) { console.error(`spex wait: no such (living) session ${id}`); process.exit(2) }
+  console.error(`spex wait: timeout — ${id} did not reach ${status || 'an actionable status'} within ${timeoutMs / 1000}s`)
+  process.exit(1)
 } else if (cmd === 'new') {
   // shorthand for `spex session new`: spex new "<prompt>" [--node X]  (prompt = first positional or --prompt)
   // createSession POSTs to the running backend so the launch runs in the backend's process (auth env + cap);

@@ -79,10 +79,6 @@ function Dashboard({ specs, sessions, reload }) {
   // (the @-directive). One-shot: SessionInterface applies it then clears `seed`, so a later reopen keeps
   // the user's own draft instead of re-seeding.
   const startNew = useCallback((text) => { setSessionSel('new'); setSeed(text); setSessionUI(true) }, [])
-  // @@@ addChild - the + button on a LEAF node is a SECOND entry point to the `nn` new-node chord: same
-  // path (startNew + CHORDS.nn), just keyed to the clicked node's id rather than `focus`. It only opens
-  // the create-node affordance — focus/selection is untouched (the click is stopped before onNodeClick).
-  const addChild = useCallback((id) => startNew(CHORDS.nn(id)), [startNew])
 
   const children = useMemo(() => specs.filter((s) => s.parent === focus.id), [specs, focus])
   const parent = focus.parent ? byId[focus.parent] : null
@@ -114,8 +110,6 @@ function Dashboard({ specs, sessions, reload }) {
   // highlighted, the overlay-dim: nodes touched by that session glow, the rest fade. Recomputes on
   // poll (specs identity changes) so a freshly-added ghost shows up without a manual refresh.
   const nodes = useMemo(() => {
-    // a node is a LEAF when nothing names it as parent — leaves carry the + add-child affordance.
-    const parents = new Set(specs.map((s) => s.parent).filter(Boolean))
     return specs.map((s) => {
     const kin = s.id === focusId || s.id === focus.parent || s.parent === focusId || s.parent === focus.parent
     let className
@@ -130,8 +124,7 @@ function Dashboard({ specs, sessions, reload }) {
     // each avatar needs: id (the avatar seed + tooltip), status (liveness ring), node (tooltip label).
     const editors = liveEditorsOf(s)
     const editorData = editors.map((e) => ({ id: e.id, status: e.status, node: e.node }))
-    // isLeaf + onAddChild drive the + add-child button SpecNode draws on leaves (alternate `nn` entry).
-    const extra = { editors: editorData, isLeaf: !parents.has(s.id), onAddChild: addChild }
+    const extra = { editors: editorData }
     return {
       id: s.id, type: 'spec', position: { x: s.x, y: s.y },
       data: editors.length
@@ -140,7 +133,7 @@ function Dashboard({ specs, sessions, reload }) {
       draggable: false, selected: s.id === focusId, className,
     }
     })
-  }, [focusId, focus.parent, highlightId, specs, liveEditorsOf, addChild])
+  }, [focusId, focus.parent, highlightId, specs, liveEditorsOf])
 
   const edges = useMemo(() => {
     const tree = specs.filter((s) => s.parent).map((s) => {

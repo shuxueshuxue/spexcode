@@ -18,7 +18,7 @@ import { loadConfig } from './specs.js'
 //              still running claude?); idle is PERSISTED (status: idle) by the Notification(idle_prompt)
 //              hook when claude sits waiting at its prompt — the ONE inferred state, guarded active-only so
 //              it never clobbers a declaration; the mark-active hook flips it back to active on real work.
-//              (offline = no tmux for the recorded id, or the pane fell back to a bare shell)
+//              (offline = no tmux for the recorded id, or claude's rendezvous socket is gone — see reconcile)
 //   awaiting → the agent's PROPOSAL, awaiting a human:
 //                proposal=merge   → shown "review"        ("ready, merge me")
 //                proposal=nothing → shown "done"          ("finished, your call")
@@ -230,48 +230,41 @@ async function listWorktrees(): Promise<{ path: string; branch: string | null }[
 }
 
 // @@@ reconcile - the shown status. awaiting → the proposal's label (review/done/close-pending),
-// shown regardless of liveness. active/idle → their LIVENESS: offline if no tmux for the recorded id (or
-// the pane fell back to a bare shell), else idle if the idle_prompt hook has fired since the last tool
-// use, else working.
-const SHELLISH = /^-?(zsh|bash|sh|fish|dash)$/  // pane sitting at a shell = claude exited/crashed
-async function paneCmd(id: string): Promise<string> {
-  try { return (await tmux(['display-message', '-p', '-t', id, '-F', '#{pane_current_command}'])).trim() } catch { return '' }
-}
+// shown regardless of liveness. active/idle → their LIVENESS: offline if no tmux for the recorded id OR
+// claude's rendezvous socket is gone (claude exited), else idle if the idle_prompt hook has fired since
+// the last tool use, else working.
 
-// @@@ paneSnapshot - liveness for the WHOLE session list in ONE tmux call. reconcile used to spawn two
-// tmux per session (has-session + display-message), so listing N sessions was 2N spawns — the dominant
-// /api/sessions cost under multi-agent load. `tmux list-panes -a` returns every pane on our socket at
-// once; we key it by session_name → that session's pane command. A session present in the map is alive;
-// its command tells working from crashed (a bare shell = claude exited). We keep the ACTIVE pane's command
-// (our sessions are single-pane, but be robust). tmux server down / no sessions → empty map → everything
-// reconciles to offline, which is correct. Tab-separated because neither a session id (uuid) nor a
-// pane_current_command (a process comm) contains a tab. The per-session alive()/paneCmd() above stay for
-// the single-session ops (reopen/capture/rawkey) that don't want a full snapshot.
-async function paneSnapshot(): Promise<Map<string, string>> {
-  const m = new Map<string, string>()
+// @@@ liveTmux - which of OUR tmux sessions exist, in ONE tmux call. reconcile used to spawn two tmux per
+// session (has-session + display-message), so listing N sessions was 2N spawns — the dominant /api/sessions
+// cost under multi-agent load. `tmux list-sessions` returns every session on our socket at once; a session
+// present in this set has a live tmux window (session_name = the id we created it with). tmux server down /
+// no sessions → empty set → everything reconciles to offline, which is correct. We deliberately do NOT read
+// `pane_current_command` any more: workers launch through the `reclaude` wrapper, which runs claude as a
+// CHILD rather than exec'ing it, so the pane's foreground command is the wrapper/shell even while claude is
+// very much alive — the pane command is NOT a liveness signal. claude liveness is its rendezvous socket
+// (see reconcile). The per-session alive() above stays for the single-session ops (capture / rawKey).
+async function liveTmux(): Promise<Set<string>> {
+  const s = new Set<string>()
   let out = ''
-  try { out = await tmux(['list-panes', '-a', '-F', '#{session_name}\t#{pane_active}\t#{pane_current_command}']) } catch { return m }
-  for (const line of out.split('\n')) {
-    if (!line) continue
-    const [name, active, ...rest] = line.split('\t')
-    if (!name) continue
-    if (active === '1' || !m.has(name)) m.set(name, rest.join('\t').trim())  // prefer the active pane
-  }
-  return m
+  try { out = await tmux(['list-sessions', '-F', '#{session_name}']) } catch { return s }
+  for (const line of out.split('\n')) { const name = line.trim(); if (name) s.add(name) }
+  return s
 }
 
-// reconcile the SHOWN status from a session's declared state + a prebuilt liveness snapshot (no per-call
-// tmux spawn — see paneSnapshot). Declarations win over liveness, in ONE path: awaiting maps to its
-// proposal label; blocked / error / needs-input map straight to themselves. We never INFER those externally.
-function reconcile(rec: SessRec, panes: Map<string, string>): DisplayStatus {
+// reconcile the SHOWN status from a session's declared state + a prebuilt liveness set (no per-call tmux
+// spawn — see liveTmux). Declarations win over liveness, in ONE path: awaiting maps to its proposal label;
+// blocked / error / needs-input map straight to themselves. We never INFER those externally.
+function reconcile(rec: SessRec, live: Set<string>): DisplayStatus {
   if (rec.status === 'awaiting') return PROPOSAL_STATUS[rec.proposal || 'nothing']
   if (rec.status !== 'active' && rec.status !== 'idle') return rec.status  // blocked | error | needs-input
-  // active/idle are the SAME live agent — claude is the pane's foreground process whether it is churning
-  // OR waiting at its prompt — so they share ONE liveness check: a dead tmux (no pane for the id) or a
-  // bare-shell pane (claude exited/crashed) is offline; else idle if the idle_prompt hook fired since the
-  // last tool, else working. The mark-active hook flips idle → active on the next real work, self-correcting.
-  if (!rec.session || !panes.has(rec.session)) return 'offline'
-  if (SHELLISH.test(panes.get(rec.session)!)) return 'offline'
+  // active/idle are the SAME live agent — claude runs whether it is churning OR waiting at its prompt — so
+  // they share ONE deterministic liveness check: offline iff the tmux window is gone OR claude's rendezvous
+  // socket is absent. claude (via the reclaude wrapper) holds CLAUDE_BG_RENDEZVOUS_SOCK open the whole time
+  // it is alive, so the socket — NOT pane_current_command, which is the wrapper/shell while claude runs as
+  // its child — is the truth that claude is up. else idle if the idle_prompt hook fired since the last tool,
+  // else working. The mark-active hook flips idle → active on the next real work, self-correcting.
+  if (!rec.session || !live.has(rec.session)) return 'offline'
+  if (!existsSync(rvSock(rec.session))) return 'offline'
   return rec.status === 'idle' ? 'idle' : 'working'
 }
 
@@ -298,13 +291,13 @@ export async function sessionPrompt(id: string): Promise<string | null> {
 // and awaiting ones still appear (their .session persists), so a session is never lost from view.
 export async function listSessions(): Promise<Session[]> {
   // ONE worktree enumeration + ONE tmux liveness snapshot for the whole list (both independent), then
-  // every session reconciles by a pure map lookup — no per-session tmux spawn.
-  const [wts, panes] = await Promise.all([listWorktrees(), paneSnapshot()])
+  // every session reconciles by a pure set lookup + one existsSync — no per-session tmux spawn.
+  const [wts, live] = await Promise.all([listWorktrees(), liveTmux()])
   const out: Session[] = []
   for (const w of wts) {
     const rec = readSessionFile(w.path)
     if (!rec.session) continue
-    out.push(toSession(rec, w.branch, w.path, reconcile(rec, panes)))
+    out.push(toSession(rec, w.branch, w.path, reconcile(rec, live)))
   }
   return out
 }
@@ -357,7 +350,7 @@ export async function sessionGraph(): Promise<{ nodes: Session[]; edges: Edge[] 
     if (!live.has(reg.watcher)) continue   // the watching agent itself is gone
     for (const t of selectSessions(nodes, reg.selectors)) {
       if (t.id === reg.watcher) continue
-      const key = `${reg.watcher} ${t.id}`
+      const key = `${reg.watcher} ${t.id}`
       if (seen.has(key)) continue
       seen.add(key)
       edges.push({ from: reg.watcher, to: t.id })
@@ -471,11 +464,11 @@ function writeSettings(path: string): string {
 // `bash <file>`, NOT typed inline. Inline send-keys TRUNCATES past ~2KB (the launch-prompt-limit trap), and
 // the surface:system gather can make --append-system-prompt arbitrarily large; a file has no length limit
 // and the only thing send-keys types is the short `bash <file>` line. It's the SAME command the inline path
-// ran (env prefix exports the rendezvous vars to the claude child), just relocated to a file: bash runs
-// claude as its foreground child, so the pane's `pane_current_command` is still `claude` (liveness detection
-// in reconcile is unchanged), and on claude's exit bash returns to a shell → SHELLISH → offline, exactly as
-// before. The file is a RUNTIME_FILE (gitignored, ignored by the merge gate, removed with the worktree) so
-// it never pollutes the spec/code work.
+// ran (env prefix exports the rendezvous vars to the claude child), just relocated to a file. Liveness no
+// longer cares what the pane's foreground command is: claude runs as a child of bash (and, via the
+// `reclaude` wrapper, a grandchild), so the pane command is the wrapper/shell — reconcile reads claude's
+// rendezvous socket instead (present while claude is alive, gone once it exits). The file is a RUNTIME_FILE
+// (gitignored, ignored by the merge gate, removed with the worktree) so it never pollutes the spec/code work.
 function launchScript(id: string, path: string, tail: string): string {
   const file = join(path, '.spex-launch.sh')
   writeFileSync(file, `${rvEnv(id)} ${CLAUDE_CMD} ${appendSysArg()} ${writeSettings(path)} ${tail}\n`)
@@ -633,10 +626,11 @@ async function waitForSocket(id: string, timeoutMs = SOCKET_READY_TIMEOUT_MS): P
 }
 
 // @@@ reopen - "back to working": clear any proposal → active, then ONE relaunch path. claude needs
-// (re)starting iff it isn't running for this id — no tmux, or the pane fell back to a bare shell after a
-// crash; in both cases we drop any stale pane and launch a fresh window that --resume's the SAME
-// conversation (with its rendezvous socket, via launch). When we DO relaunch we then WAIT for that socket
-// to come up (waitForSocket) before returning, so a caller that dispatches immediately after reopen (e.g.
+// (re)starting iff it isn't running for this id — the SAME deterministic liveness reconcile uses: no tmux,
+// or no rendezvous socket (claude exited, even though the wrapper/shell may still hold the pane). In both
+// cases we drop any stale pane and launch a fresh window that --resume's the SAME conversation (with its
+// rendezvous socket, via launch). When we DO relaunch we then WAIT for that socket to come up
+// (waitForSocket) before returning, so a caller that dispatches immediately after reopen (e.g.
 // mergeSession) addresses a live socket rather than racing the boot. If claude is still live we only
 // cleared the proposal — no wait, the socket already exists. Also serves the plain "relaunch" of an
 // offline (already-active) one. Fail-loud is unchanged: if the socket never appears, the later sendKeys
@@ -645,8 +639,8 @@ export async function reopen(id: string): Promise<boolean> {
   const wt = await findWorktree(id)
   if (!wt) return false
   writeSessionFile(wt.path, { ...wt.rec, status: 'active', proposal: null })
-  if (!(await alive(id)) || SHELLISH.test(await paneCmd(id))) {
-    await tmuxOk(['kill-session', '-t', id])   // drop a dead/bare-shell pane if any (no-op when none)
+  if (!(await alive(id)) || !existsSync(rvSock(id))) {
+    await tmuxOk(['kill-session', '-t', id])   // drop a dead/socketless pane if any (no-op when none)
     await launch(id, wt.path, `--resume ${id}`)
     await waitForSocket(id)   // a relaunched agent is "ready" only once its rendezvous socket is up
   }

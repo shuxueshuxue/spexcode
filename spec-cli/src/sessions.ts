@@ -250,14 +250,22 @@ function writeSessionFile(dir: string, rec: SessRec): void {
   writeFileSync(join(dir, '.session'), lines.join('\n') + '\n')
 }
 
+// @@@ fail-loud enumeration - the worktree set is the board's EXISTENCE truth, so a failed enumeration must
+// NEVER masquerade as an empty repo. `gitA` swallows a git error to '' (→ zero rows), which a caller would
+// read as "every worktree was removed" — exactly the false mass-`closed` watchSessions would emit once the
+// flicker debounce is gone. `git worktree list` ALWAYS lists at least the main worktree, so an ok run with
+// zero `worktree ` lines is itself a failure. Both cases THROW; the caller (listSessions) propagates and
+// watchSessions' poll `catch` simply skips the tick with `prev` intact — no fabricated removals.
 async function listWorktrees(): Promise<{ path: string; branch: string | null }[]> {
-  const out = await gitA(['-C', mainRoot(), 'worktree', 'list', '--porcelain'])
+  const r = await gitTry(['-C', mainRoot(), 'worktree', 'list', '--porcelain'])
+  if (!r.ok) throw new Error(`git worktree list failed: ${r.stderr.trim() || 'unknown error'}`)
   const list: { path: string; branch: string | null }[] = []
   let cur: { path: string; branch: string | null } | null = null
-  for (const line of out.split('\n')) {
+  for (const line of r.stdout.split('\n')) {
     if (line.startsWith('worktree ')) { cur = { path: line.slice(9), branch: null }; list.push(cur) }
     else if (line.startsWith('branch ') && cur) cur.branch = line.slice(7).replace('refs/heads/', '')
   }
+  if (!list.length) throw new Error('git worktree list returned no worktrees (enumeration failed; the main worktree is always present)')
   return list
 }
 
@@ -332,20 +340,38 @@ export async function sessionPrompt(id: string): Promise<string | null> {
   return wt ? readPromptFile(wt.path) : null
 }
 
+// @@@ lastKnownSession - the last successfully-read Session row per worktree path. A worktree's EXISTENCE
+// is definitive (it is in `git worktree list`, its directory is on disk); a transient failure reading its
+// `.session` (an ENOENT race, or a sibling read failing under a concurrent merge) must NOT drop it from the
+// board — that absence is exactly what watchSessions used to mis-read as a `closed · removed`. So a degraded
+// read serves this last-known row instead of vanishing. Pruned each poll to only paths still present.
+const lastKnownSession = new Map<string, Session>()
+
 // @@@ listSessions - every worktree that IS a session (has a .session id), status reconciled. Offline
 // and awaiting ones still appear (their .session persists), so a session is never lost from view.
 export async function listSessions(): Promise<Session[]> {
   // ONE worktree enumeration + ONE tmux liveness snapshot for the whole list (both independent), then
   // every session reconciles by a pure set lookup + one existsSync — no per-session tmux spawn.
   const [wts, live] = await Promise.all([listWorktrees(), liveTmux()])
-  // each row reads that worktree's .session + prompt sidecar; a worktree removed mid-read (a worker
-  // self-merged and retired it) is SKIPPED, never fatal — see resilience.guardWorktree.
-  const rows = await Promise.all(wts.map((w) => guardWorktree(w.path, () => {
+  // each row reads that worktree's .session + prompt sidecar. A worktree whose directory is GENUINELY gone
+  // (a worker self-merged and retired it) is omitted; one whose directory still exists but hit a transient
+  // read failure is served from its last-known row — never dropped. See resilience.guardWorktree.
+  const rows = await Promise.all(wts.map((w) => guardWorktree<Session | null>(w.path, () => {
     const rec = readSessionFile(w.path)
-    if (!rec.session) return null
-    return toSession(rec, w.branch, w.path, reconcile(rec, live))
+    if (!rec.session) { lastKnownSession.delete(w.path); return null }   // exists but isn't a session
+    const s = toSession(rec, w.branch, w.path, reconcile(rec, live))
+    lastKnownSession.set(w.path, s)
+    return s
+  }, () => {
+    // DEGRADED: the directory still exists but reading its .session failed transiently. NEVER drop a live
+    // session — serve its last-known row. (No last-known means a first sighting raced a failure; nothing to
+    // show yet, it reappears next poll — and since it was never in watchSessions' `prev`, no false closed.)
+    return lastKnownSession.get(w.path) ?? null
   })))
-  return rows.filter((s): s is Session => s !== null)
+  // prune last-known entries for worktrees that no longer appear at all (genuinely removed), keeping it bounded.
+  const livePaths = new Set(wts.map((w) => w.path))
+  for (const p of [...lastKnownSession.keys()]) if (!livePaths.has(p)) lastKnownSession.delete(p)
+  return rows.filter((s): s is Session => s != null)
 }
 
 // @@@ session graph = LIVE monitors, not a stored relationship. An edge A→B means "agent A is RIGHT NOW
@@ -1099,34 +1125,30 @@ export async function watchSessions(emit: (line: string) => void, opts: WatchOpt
   const { selectors = [], statuses, includeIdle = false, intervalMs = 5000, as } = opts
   const tag = as ? `[${as}] ` : ''
   const prev = new Map<string, DisplayStatus>()
-  const paths = new Map<string, string>()   // last-seen worktree path per id → detect a GENUINE worktree removal
-  const misses = new Map<string, number>()   // consecutive polls an id has been absent → flicker guard (see below)
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
   for (;;) {
     try {
-      const cur = selectSessions(await listSessions(), selectors, statuses)
-      const ids = new Set(cur.map((s) => s.id))
-      for (const s of cur) {
-        paths.set(s.id, s.path)   // remember where it lives, so a later disappearance can be checked against disk
-        misses.delete(s.id)       // present again → any nascent miss streak was just a flicker, reset it
+      // EXISTENCE is the selector-matched board across ALL statuses — listSessions now lists every worktree
+      // that exists (a transient detail-read failure degrades a row, never drops it — see guardWorktree), so
+      // membership here IS the worktree's existence. The `statuses` filter governs only which TRANSITIONS we
+      // emit, never whether a session is present — using it for presence would read a status change out of the
+      // filtered set as a (false) removal.
+      const all = selectSessions(await listSessions(), selectors)
+      const ids = new Set(all.map((s) => s.id))
+      const passesStatus = (st: DisplayStatus) => !statuses?.length || statuses.includes(st)
+      for (const s of all) {
         if (!prev.has(s.id)) emit(tag + launchEvent(s)) // FIRST sighting → launched, any status (incl. 'working'), once
         if (s.status === prev.get(s.id)) continue // only on transition, not every tick
         prev.set(s.id, s.status)
-        if (WATCH_ACTIONABLE.has(s.status) || (includeIdle && s.status === 'idle')) emit(tag + sessionEvent(s))
+        if (passesStatus(s.status) && (WATCH_ACTIONABLE.has(s.status) || (includeIdle && s.status === 'idle'))) emit(tag + sessionEvent(s))
       }
-      // @@@ closed only when GENUINELY gone — never on a one-poll board flicker. listSessions can transiently
-      // drop a live session (a worktree skipped mid-read, a git/tmux hiccup during the boot window); it then
-      // reappears next poll. So a vanished id is "closed" only if its worktree is actually removed from disk,
-      // OR it has been absent for 2 consecutive polls. A single-poll absence with the worktree still present
-      // just waits for the next poll to confirm.
+      // @@@ closed = the worktree is GONE. Because listSessions lists every EXISTING worktree (a flaky detail
+      // read degrades, never drops), an id absent from the board means its worktree directory was actually
+      // removed: a DEFINITIVE fact, not a flaky absence. So removal needs no 2-poll debounce / existsSync
+      // re-check; emit `closed` exactly once the moment the id leaves the list.
       for (const id of [...prev.keys()]) {
         if (ids.has(id)) continue
-        const path = paths.get(id)
-        const gone = !path || !existsSync(path)
-        const n = (misses.get(id) || 0) + 1
-        misses.set(id, n)
-        if (!gone && n < 2) continue   // single-poll flicker, worktree still on disk → wait for the next poll
-        prev.delete(id); paths.delete(id); misses.delete(id)
+        prev.delete(id)
         emit(`${tag}[spex] closed \u00b7 removed  [id ${id}]`)
       }
     } catch { /* transient git/tmux hiccup; keep watching */ }

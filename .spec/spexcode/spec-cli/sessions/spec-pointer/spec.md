@@ -1,0 +1,34 @@
+---
+title: spec-pointer
+status: active
+hue: 280
+desc: When a dispatched session names an existing node, point the agent at that node's live spec.md by path — never inject the body.
+code:
+  - spec-cli/src/sessions.ts
+---
+
+# spec-pointer
+
+## raw source
+
+A session dispatched against an existing spec node should start already knowing **which spec is its ground
+truth** — without the launcher pasting the spec body into the prompt. Inlining a snapshot bloats the launch
+prompt toward the truncation limit and freezes a copy that goes stale the moment the agent edits the file.
+A **path is enough**: hand the agent one line pointing at the spec, and it reads the live file itself.
+
+## expanded spec
+
+When [[launch]]'s `newSession` resolves a node ref — explicit `--node`, else the prompt's first `@mention` —
+to a node that **already exists** in the committed spec tree, it appends **one line** to the launch prompt:
+an **absolute path** to that node's `spec.md` **inside the new session's own worktree**. The ref is resolved
+to its worktree-relative spec path against the spec index; since the worktree is freshly branched off main,
+that relative path is identical there, so the absolute pointer is just the worktree dir joined with it.
+
+Only the **pointer** is appended — never the spec **body**. The agent opens the live file, so it always sees
+the current contract, and the launch prompt stays small (well under the shell-arg truncation limit [[launch]]
+guards against). This is the plain-node companion to [[dispatch]]'s directive prompts: those rewrite the
+launch prompt for `@new` / `@delete` ops, while this only **augments** an existing-node dispatch.
+
+It is **fail-quiet by absence**: a `@new` placeholder (no committed id yet) and an unknown id resolve to
+nothing, so no pointer is appended and the agent launches with the human's prompt unchanged. The directive
+branches keep their own rewrites untouched — the pointer is added only on the otherwise-plain node dispatch.

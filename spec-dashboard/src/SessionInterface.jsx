@@ -558,9 +558,7 @@ export default function SessionInterface({ sessions, specs = [], focusNode, open
                 {menu && menu.kind === 'config' && slashMenu(false, menu.query ? `/${menu.query}` : t('session.menuPresets'))}
               </div>
               <div className="si-hint">
-                {focusNode
-                  ? <>{t('session.hintFocused.before')}<code>@</code>{t('session.hintFocused.mid')}<code>@{focusNode.id}</code>{t('session.hintFocused.after')}</>
-                  : <>{t('session.hintNoFocus.before')}<code>@</code>{t('session.hintNoFocus.after')}</>}
+                {t('session.hint.before')}<code>@</code>{t('session.hint.mid')}<code>/</code>{t('session.hint.after')}
               </div>
             </div>
           ) : (

@@ -139,9 +139,20 @@ export default {
 
   sessionGraph: {
     brand: '$ session-graph',
-    hint: 'edges = live monitors (A→B: A is watching B) · arrows/hjkl move · ⏎ or click opens · drag A→B to ask A to monitor B · t to switch back',
+    helpTitle: 'keymap & legend (?)',
     asked: ({ a, b }) => `asked ${a} to monitor ${b}`,
     monitorPrompt: ({ label, id }) => `Please monitor session ${label} (${id}): run \`spex watch ${id}\` in the background and keep it running so its transitions surface to me.`,
+    legend: {
+      title: 'session graph',
+      close: 'close (esc or ?)',
+      secKeys: 'keys',
+      move: 'move the cursor to the nearest session',
+      open: 'open the focused session',
+      monitor: 'drag A→B to ask A to monitor B',
+      back: 'switch back to the spec graph',
+      secEdges: 'edges',
+      edgesDesc: 'each arrow A→B is a live monitor — agent A is running `spex watch B` right now.',
+    },
   },
 
   session: {
@@ -154,8 +165,7 @@ export default {
     menuPresets: 'config presets',
     menuSpecNodes: 'spec nodes',
     menuHint: '↑↓ pick · ⏎ insert',
-    hintFocused: { before: 'type ', mid: ' to reference a spec — ', after: ' (focused) is first' },
-    hintNoFocus: { before: 'type ', after: ' to reference a spec — otherwise this prompt is node-agnostic' },
+    hint: { before: 'type ', mid: ' to reference a spec · ', after: ' to apply a config preset' },
     navBtn: 'nav',
     navTitle: "nav mode — forward raw keystrokes to drive the agent's interactive menus (⌃/⌘+I)",
     relaunch: 'relaunch',

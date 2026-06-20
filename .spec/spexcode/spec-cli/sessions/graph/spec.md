@@ -39,11 +39,15 @@ observational) surface.
 the **complete session lifecycle**, not only actionable transitions. A session's **first sighting** emits
 a `launched` event (once per id, never re-fired, so working/idle toggles don't flap); on top of that it
 emits each actionable transition (review / done / close-pending / offline / error / needs-input) and the
-removal (`closed`). `closed` fires **only when a session is genuinely gone** — its worktree removed, or
-it is absent for two consecutive polls — *never* on a single-poll list flicker (a worktree skipped
-mid-read, a transient git/tmux hiccup), which would otherwise raise a false "session lost". The net feed
-is `launched → [actionable transitions] → closed` — a true "subscribe to all session changes" stream for
-a super-manager, where each watch process is one subscriber and the selector is the subscription.
+removal (`closed`). `closed` fires the moment a session's id is **absent from the board**, which is now a
+**definitive** removal rather than a guess: the board lists every worktree that exists (a flaky detail read
+degrades a row, never drops it, and a failed enumeration skips the poll — see [[worktree-resilience]]), so
+absence means the worktree directory is actually gone. No flicker debounce is needed or kept — existence no
+longer flaps, so removal is read straight off the board. Presence is tracked across **all** statuses (the
+`--status` filter governs only which transitions are *emitted*, never whether a session counts as present),
+so a status falling out of the filter is never misread as a removal. The net feed is `launched →
+[actionable transitions] → closed` — a true "subscribe to all session changes" stream for a super-manager,
+where each watch process is one subscriber and the selector is the subscription.
 
 ### `spex wait` — the one-shot blocking wait
 

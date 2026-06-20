@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { repoRoot, gitA, headSha, worktreeSpecSig, worktreeSpecDelta, type NodeOp } from './git.js'
+import { repoRoot, gitA, gitTry, headSha, worktreeSpecSig, worktreeSpecDelta, type NodeOp } from './git.js'
 import { guardWorktree } from './resilience.js'
 
 // @@@ portable layout - the ONE seam where "where things live" is policy, not hardcode.
@@ -27,14 +27,20 @@ function readConfig(root: string): Config {
   try { return JSON.parse(readFileSync(p, 'utf8')) } catch { return {} }
 }
 
+// the worktree set is the board's EXISTENCE truth — a FAILED enumeration must never read as an empty repo.
+// `git worktree list` always lists at least main, so a git error OR a zero-row parse is a failure: THROW
+// rather than return [] (which resolveLayout would render as "every worktree vanished"). gitTry, async like
+// gitA, keeps it off the sync fork() path. The caller surfaces the failure (a 502) instead of a false board.
 async function gitWorktrees(root: string): Promise<{ path: string; branch: string | null }[]> {
-  const out = await gitA(['-C', root, 'worktree', 'list', '--porcelain']) // async: off the sync fork() path
+  const r = await gitTry(['-C', root, 'worktree', 'list', '--porcelain'])
+  if (!r.ok) throw new Error(`git worktree list failed: ${r.stderr.trim() || 'unknown error'}`)
   const list: { path: string; branch: string | null }[] = []
   let cur: { path: string; branch: string | null } | null = null
-  for (const line of out.split('\n')) {
+  for (const line of r.stdout.split('\n')) {
     if (line.startsWith('worktree ')) { cur = { path: line.slice(9), branch: null }; list.push(cur) }
     else if (line.startsWith('branch ') && cur) cur.branch = line.slice(7).replace('refs/heads/', '')
   }
+  if (!list.length) throw new Error('git worktree list returned no worktrees (enumeration failed; main is always present)')
   return list
 }
 
@@ -100,22 +106,32 @@ export async function resolveLayout(): Promise<Layout> {
   const mainWt = raw.find((w) => w.branch === 'main')
   const mainRef = mainWt?.branch ?? 'main'
   // each worktree's spec delta is independent — compute (or cache-hit) them all in parallel. Each read is
-  // wrapped: a worktree removed mid-read (a worker self-merged and retired it) is SKIPPED, never thrown out
-  // of the request — see resilience.guardWorktree.
-  const rows = await Promise.all(raw.map((w) => guardWorktree(w.path, async (): Promise<Worktree> => {
-    const sess = readSession(w.path)
+  // wrapped: a worktree whose directory was genuinely removed mid-read (a worker self-merged and retired it)
+  // is OMITTED, but one whose directory still exists and merely hit a transient DETAIL failure (a git index/
+  // ref lock under a concurrent merge) is kept as a DEGRADED row — never dropped. See resilience.guardWorktree.
+  const rows = await Promise.all(raw.map((w) => {
     const isMain = w.branch === 'main'
     const fromBranch = w.branch && w.branch.startsWith(convention.branchPrefix)
       ? w.branch.slice(convention.branchPrefix.length) : null
-    const node = isMain ? null
-      : convention.nodeFrom === 'session' ? sess.node : (fromBranch ?? sess.node)
-    // only MANAGED SpexCode worktrees (a .session label, or a node/* branch) get a spec delta — harness
-    // scratch worktrees (e.g. agent-*) are skipped, both to keep them off the board AND to avoid their
-    // (often large) diffs dominating /api/layout latency.
-    const managed = !!sess.session || (!!w.branch && w.branch.startsWith(convention.branchPrefix))
-    const ops = isMain || !managed ? [] : await cachedDelta(w.path, mainRef)
-    return { path: w.path, branch: w.branch, node, session: sess.session, status: sess.status, isMain, ops }
-  })))
+    return guardWorktree<Worktree>(w.path, async (): Promise<Worktree> => {
+      const sess = readSession(w.path)
+      const node = isMain ? null
+        : convention.nodeFrom === 'session' ? sess.node : (fromBranch ?? sess.node)
+      // only MANAGED SpexCode worktrees (a .session label, or a node/* branch) get a spec delta — harness
+      // scratch worktrees (e.g. agent-*) are skipped, both to keep them off the board AND to avoid their
+      // (often large) diffs dominating /api/layout latency.
+      const managed = !!sess.session || (!!w.branch && w.branch.startsWith(convention.branchPrefix))
+      const ops = isMain || !managed ? [] : await cachedDelta(w.path, mainRef)
+      return { path: w.path, branch: w.branch, node, session: sess.session, status: sess.status, isMain, ops }
+    }, (): Worktree => {
+      // DEGRADED: the directory still exists but a detail read failed (git lock under a concurrent merge, or
+      // a file-read hiccup). The worktree EXISTS, so it stays on the board. Built from RAW facts: node from
+      // the branch, ops from the last cached delta (or none), session/status best-effort from a cheap re-read.
+      const sess = (() => { try { return readSession(w.path) } catch { return { node: null, session: null, status: null } } })()
+      const node = isMain ? null : (fromBranch ?? sess.node)
+      return { path: w.path, branch: w.branch, node, session: sess.session, status: sess.status, isMain, ops: deltaCache.get(w.path)?.ops ?? [] }
+    })
+  }))
   const worktrees = rows.filter((w): w is Worktree => w !== null)
   // drop cache entries for worktrees that no longer exist (a closed session), so the map stays bounded.
   const live = new Set(raw.map((w) => w.path))

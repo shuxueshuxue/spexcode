@@ -119,8 +119,12 @@ at the stop-gate (`session done --propose merge`), so a human button to force `w
 would be redundant. The header therefore only surfaces actions a human still drives (relaunch a dead
 worktree, accept/reject a pending proposal, close), and a session still reaches `review` purely through the
 agent's proposal. SessionWindow is
-the read-only glance: every session with its status dot and pending-op count, click to highlight that
-worktree's overlays on the board (and focus its first changed node).
+the read-only glance: every session with its status dot and pending-op count. It carries **two gestures
+that mirror the graph**: a single click *locks* the board onto that session — its overlays light up,
+every other node greys out (and focus jumps to its first changed node); a second click releases the
+lock. The locked row wears that grip too — a thick spine in the session's colour, a tinted fill, and a
+🔒 in place of its status — so the row and the dimmed graph read as one selection rather than two
+loosely-coupled states. **Double-click opens that session's board**, the mouse parallel to ⏎.
 
 `SessionInterface.jsx` is the `Enter` modal: `order = ['new', ...session ids]` with `active` clamped to
 a real tab. The New tab prefills a `@${focusId}` reference (keyed on `focusId`, not the focus object, so
@@ -146,8 +150,11 @@ xterm's own scrollback (custom wheel handler returns `false`). It enables **forc
 modifier+drag selects text locally despite the app's mouse tracking — drawn in a **bright visible highlight**
 — and a host-level `⌘`/`Ctrl`+C copies the exact `term.getSelection()` to the clipboard and flashes a
 **copied confirmation** in the legible corner caption (no stdin re-enabled). `SessionWindow.jsx` is the top-right floater of status-dot
-rows with a pending-op glyph count, highlighting a worktree's overlays on pick and opening the interface
-on open. The window and the interface share their session-view primitives from `session.js` — the
+rows with a pending-op glyph count; a row's `locked` state matches its **source** (worktree path) against
+the board's `highlightId` — not its session id — so the lock the row paints is the exact selection the
+graph dims by (overlays keyed by `source`). Click toggles that lock (`onPick`), double-click opens the row's
+own session by id (`onOpenSession` → `openSession`), and the header `⏎` button opens the interface at the
+remembered tab. The window and the interface share their session-view primitives from `session.js` — the
 status→dot-colour map (`STATUS_DOT`) and the `node || title || branch || id` display name (`sessionName`) —
 so a session reads the same colour and label on every surface from one definition. All of this renders only
 what `/api/board` reports — no session logic lives in the dashboard — so the raw source (a thin view

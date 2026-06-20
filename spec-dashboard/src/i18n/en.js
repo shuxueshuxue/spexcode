@@ -97,6 +97,8 @@ export default {
   sessionWindow: {
     title: 'sessions',
     newTitle: 'open the session interface (⏎)',
+    rowTitle: 'click to lock the graph onto this session · double-click to open it',
+    lockedTitle: 'graph locked to this session — click again to release',
     emptyBefore: 'no live worktrees — press ',
     emptyAfter: ' to start one',
   },

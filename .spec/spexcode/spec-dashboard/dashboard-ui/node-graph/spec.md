@@ -27,8 +27,6 @@ Each node is a tight **two-row tile** — not a card — so the whole tree fits 
 
 **One colour system.** A session's avatar face and its *labelling colour* — node ring/overlay, the `⏎`, the reparent edge, the session-row stripe — derive from the SAME hash of the SAME seed (the session id), so a session's face and every mark that names it share one hue. The backend emits a stable `seed` per worktree (its live session id, else its path); the dashboard derives the colour.
 
-A **leaf** node carries a small `+` button on its right edge (revealed on hover/focus): a SECOND entry to the `nn` new-node chord (see [[keyboard-nav]]) that opens the New Session tab pre-seeded with `@new under @<id>` for that node. It is purely additive — it never moves focus/selection.
-
 A `moved` overlay carrying `toParent` draws a **faint dashed arrow** to the node's proposed new parent, in the author session's colour, so a human SEES the reparent before it merges — overlaid on, never replacing, the solid tree edges.
 
 Because this vocabulary is dense, a **floating legend** decodes it on demand (`?` toggles, Esc closes), reading its swatches from the SAME constants the nodes render from so it can never drift. The legend and the [[settings]] popup share one centered-modal chrome (`Modal.jsx`).

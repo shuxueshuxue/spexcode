@@ -80,19 +80,6 @@ body {
   transition: border-color .12s;
 }
 
-/* @@@ add-child + - leaf-only affordance that OCCUPIES the source handle's spot: an alternate entry to
-   the `nn` new-node flow (see SpecNode.jsx). Centred ON the right edge (right:0 + translate(50%,-50%)) so
-   it lands exactly where the Position.Right handle sits, not beside it. Subtle and hidden until the node is
-   hovered/focused so it never clutters the tree; stays clickable (the handle is non-interactive here). */
-.node-add {
-  position: absolute; right: 0; top: 50%; transform: translate(50%, -50%);
-  width: 16px; height: 16px; padding: 0; display: grid; place-items: center;
-  font-size: 13px; line-height: 1; color: var(--muted);
-  background: var(--panel); border: 1px solid var(--line); border-radius: 3px;
-  cursor: pointer; opacity: 0; transition: opacity .12s, color .12s, border-color .12s; z-index: 2;
-}
-.spec-node:hover .node-add, .spec-node.focused .node-add { opacity: .85; }
-.node-add:hover { color: var(--blue); border-color: var(--blue); opacity: 1; }
 .spec-node.focused { border-color: var(--blue); outline: 2px solid var(--blue); outline-offset: -1px; }
 .spec-node.active.focused { border-color: var(--orange); outline-color: var(--orange); }
 .spec-node.drift.focused { border-color: var(--yellow); outline-color: var(--yellow); }

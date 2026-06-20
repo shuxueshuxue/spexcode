@@ -152,15 +152,18 @@ if (cmd === 'serve') {
   })
 } else if (cmd === 'new') {
   // shorthand for `spex session new`: spex new "<prompt>" [--node X]  (prompt = first positional or --prompt)
-  const { newSession } = await import('./sessions.js')
+  // createSession POSTs to the running backend so the launch runs in the backend's process (auth env + cap);
+  // it falls back to an in-process launch only when no backend answers.
+  const { createSession } = await import('./sessions.js')
   const prompt = flag('prompt') ?? positionals(3)[0] ?? ''
-  console.log(JSON.stringify(await newSession(flag('node') ?? null, prompt), null, 2))
+  console.log(JSON.stringify(await createSession(flag('node') ?? null, prompt), null, 2))
 } else if (cmd === 'session') {
   const sub = process.argv[3]
   const s = await import('./sessions.js')
   const id = process.argv[4]
   if (sub === 'new') {
-    console.log(JSON.stringify(await s.newSession(flag('node') ?? null, flag('prompt') ?? ''), null, 2))
+    // route through the backend (auth env + concurrency cap); in-process only if no backend is reachable.
+    console.log(JSON.stringify(await s.createSession(flag('node') ?? null, flag('prompt') ?? ''), null, 2))
   } else if (sub === 'list') {
     console.log(JSON.stringify(await s.listSessions(), null, 2))
   } else if (sub === 'reopen' || sub === 'resume') {

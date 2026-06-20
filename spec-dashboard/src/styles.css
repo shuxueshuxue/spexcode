@@ -341,7 +341,11 @@ body {
   display: flex; align-items: center; justify-content: space-between;
   padding: 6px 9px; background: var(--panel2); border-bottom: 1px solid var(--line);
 }
-.sesswin-title { color: var(--muted); font-size: 11px; }
+.sesswin-title { color: var(--muted); font-size: 11px; display: flex; align-items: center; gap: 6px; }
+.sesswin-count {
+  background: var(--panel); color: var(--muted); border-radius: 8px;
+  padding: 0 6px; font-size: 10px; line-height: 15px; min-width: 15px; text-align: center;
+}
 .sesswin-new {
   background: var(--paper); border: 1px solid var(--blue); color: var(--blue);
   border-radius: 4px; padding: 1px 7px; cursor: pointer; font-family: var(--mono); font-size: 11px;
@@ -354,13 +358,21 @@ body {
   padding: 7px 9px; background: none; border: none; border-bottom: 1px solid var(--line);
   border-left: 2px solid var(--ov, transparent); cursor: pointer; text-align: left;
   font-family: var(--mono); font-size: 12px; color: var(--ink2);
+  user-select: none; /* double-click opens — don't let it select the row text */
+  transition: background .12s, border-left-width .12s;
 }
 .sess-row:last-child { border-bottom: none; }
 .sess-row:hover { background: var(--panel); }
-.sess-row.on { background: var(--panel2); }
+/* locked = this session owns the graph (everything else greyed). The row mirrors that grip: a thick
+   spine in the session colour, a tinted fill, and the same lock the cursor is told about. */
+.sess-row.locked {
+  background: color-mix(in srgb, var(--ov) 12%, var(--panel2));
+  border-left-width: 4px; color: var(--ink); font-weight: 600;
+}
 .sess-dot { width: 7px; height: 7px; border-radius: 2px; flex: none; }
 .sess-id { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sess-status { color: var(--muted); font-size: 10px; flex: none; }
+.sess-lock { font-size: 10px; flex: none; line-height: 1; filter: saturate(0); }
 .sess-ops { color: var(--ov, var(--blue)); font-size: 11px; font-weight: 700; flex: none; }
 
 /* ---- help modal: keymap + legend (opened by `?`) ---- */

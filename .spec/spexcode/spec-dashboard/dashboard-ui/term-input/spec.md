@@ -32,9 +32,16 @@ empty-line `NAV` map calling `onNav` — and its CSS (`.pane-term` / `.term-host
 removed from `NodeView.jsx`, whose popup is now a reference-only view (tabs `spec` / `recent` / `history`,
 no terminal, no keyboard special-case — see [[work-pane]]). The live-terminal-with-external-input idea was
 re-realised in the session interface ([[session-console]]): `SessionTerm` streams the real tmux pane
-(read-only xterm over SSE) and a docked input forwards keystrokes via `/api/sessions/:id/keys`, with list
-nav lifted to the **window** level so arrows survive xterm focus — the same "keys are ours, not xterm's"
-guarantee, now over a real pane instead of a mock. `App.jsx`'s capture-phase listener still enforces that
+(read-only xterm over one WebSocket) and a docked input dispatches the message through the rendezvous
+**control socket** (`POST /api/sessions/:id/keys`, which injects via the daemon socket, **bypassing tmux**)
+— **never** by writing the line into the pane. That distinction is load-bearing: scrolling the terminal
+puts tmux in **copy-mode**, where any bytes written into the pane are eaten as copy-mode navigation and
+never reach the agent; dispatching out-of-band lands the message regardless of scroll/copy-mode state. The
+WebSocket the terminal holds is **display + scroll only** (it carries the read-only pane stream down and,
+back up, *only* the synthetic wheel→copy-mode scroll reports). Dispatch is fail-loud: `/keys` 502s when it
+can't deliver, and the input surfaces that (restores the draft, flags the error) rather than pretend it
+sent. List nav is lifted to the **window** level so arrows survive xterm focus — the same "keys are ours,
+not xterm's" guarantee, now over a real pane instead of a mock. `App.jsx`'s capture-phase listener still enforces that
 arrows belong to navigation while a modal owns the keys. So `TermPane.jsx` stands as the original in-popup
 realisation, presently dormant, while the contract lives on over a real session pane — the realisation moved
 surfaces, the principle (input outside xterm so arrows can navigate) did not.

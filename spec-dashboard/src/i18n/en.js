@@ -172,6 +172,7 @@ export default {
     navExit: 'click to exit nav mode',
     msgOffline: 'relaunch to message this session',
     msgPlaceholder: 'message this session · ⏎ to send',
+    msgError: '⚠ not delivered — retry',
   },
 
   settings: {

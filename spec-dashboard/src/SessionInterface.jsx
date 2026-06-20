@@ -12,9 +12,10 @@ import { useT } from './i18n/index.jsx'
 //     `@`. Enter launches a real session, then we SWITCH to it.
 //   · an existing session focused -> the content becomes a READ-ONLY live tmux terminal (SessionTerm),
 //     with the SINGLE human input docked at the BOTTOM. The terminal never accepts typing; the bottom box
-//     is the only input — submitting writes the line + Enter into the pane over the terminal's OWN socket
-//     (each SessionTerm registers a `send` writer in `sendersRef`), falling back to POST /keys if the
-//     socket isn't open yet.
+//     is the only input — submitting dispatches the line through the CONTROL SOCKET (POST /keys, which
+//     injects via the daemon socket, bypassing tmux), NEVER by writing into the pane. That is what makes a
+//     message land even when tmux is in copy-mode (which scrolling the terminal enters); the WebSocket the
+//     terminal holds is for the read-only display + scroll only.
 // "BOARDING SWITCH" not "temporary modal": the surface stays MOUNTED while the board is open AND while
 // it's hidden (driven by the `open` prop — App never unmounts it). So the selected tab (`sel`, lifted to
 // App) AND any typed-but-unsent input survive a close/reopen — you switch back to exactly where you were.
@@ -121,6 +122,7 @@ export default function SessionInterface({ sessions, specs = [], focusNode, open
   // a single shared box. Survives tab switches and close/reopen (the panel stays mounted, see `open`).
   const [drafts, setDrafts] = useState({})
   const [sending, setSending] = useState(false)
+  const [sendErr, setSendErr] = useState(false)   // last /keys dispatch failed — surfaced under the ❯ box
   // @@@ nav mode - when ON, the ❯ box is disabled and every keystroke is forwarded RAW to the active
   // session's pane (POST /rawkey → tmux send-keys) so the human drives the agent's interactive TUI menus.
   // `menuById` is the best-effort, NON-authoritative hint (set by each SessionTerm) that a pane currently
@@ -130,9 +132,6 @@ export default function SessionInterface({ sessions, specs = [], focusNode, open
   const lastEscRef = useRef(0)
   const taRef = useRef(null)
   const msgRef = useRef(null)
-  // each mounted SessionTerm registers its socket writer here, keyed by session id, so the bottom box can
-  // push the typed line into the active session's pane over the SAME socket the terminal already holds.
-  const sendersRef = useRef({})
 
   const order = useMemo(() => ['new', ...sessions.map((s) => s.id)], [sessions])
   const active = order.includes(sel) ? sel : 'new'
@@ -150,7 +149,7 @@ export default function SessionInterface({ sessions, specs = [], focusNode, open
 
   // nav mode binds to ONE live session's menu — leaving the tab (or it going offline) exits it, so raw
   // keystrokes can never leak into the wrong pane.
-  useEffect(() => { setNavMode(false) }, [active])
+  useEffect(() => { setNavMode(false); setSendErr(false) }, [active])
   useEffect(() => { if (selSession?.status === 'offline') setNavMode(false) }, [selSession?.status])
   // forward one raw key to the active session's pane (fire-and-forget; the backend tmux send-keys it).
   const sendRawKey = (key) => {
@@ -275,17 +274,28 @@ export default function SessionInterface({ sessions, specs = [], focusNode, open
     requestAnimationFrame(() => { const el = taRef.current; if (el) { el.focus(); el.setSelectionRange(caret, caret) } })
   }
 
+  // @@@ control-socket dispatch - the message ALWAYS goes through the rendezvous CONTROL SOCKET
+  // (POST /keys → daemon socket, bypassing tmux), NEVER by writing into the tmux pane. Writing pane bytes
+  // (the old WebSocket path) breaks whenever tmux is in COPY MODE — which scrolling the terminal enters —
+  // because copy-mode eats those bytes as navigation instead of delivering them to the agent. /keys injects
+  // out-of-band, so a message lands regardless of scroll/copy-mode state. The WebSocket stays for the
+  // read-only DISPLAY stream + wheel→copy-mode scroll only. Fail-loud: /keys 502s if dispatch fails, and we
+  // surface that (restore the draft, flag the error) rather than pretend it sent.
   const sendMsg = async () => {
     const text = msg
     if (!text.trim() || active === 'new') return
     setMsg('')
-    // prefer the terminal's live socket (text + Enter as raw bytes); fall back to POST /keys if it isn't
-    // open yet (e.g. the terminal just mounted and the ws is still connecting).
-    if (sendersRef.current[active]?.(text + '\r')) return
-    await fetch(`/api/sessions/${active}/keys`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, enter: true }),
-    }).catch(() => {})
+    setSendErr(false)
+    try {
+      const res = await fetch(`/api/sessions/${active}/keys`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, enter: true }),
+      })
+      if (!res.ok) throw new Error(`keys ${res.status}`)
+    } catch {
+      setMsg(text)      // don't lose the message — put it back so the human can retry
+      setSendErr(true)
+    }
   }
 
   // lifecycle actions — thin POSTs to the session state machine, then reload the board.
@@ -473,7 +483,7 @@ export default function SessionInterface({ sessions, specs = [], focusNode, open
                   {/* every opened session's terminal stays mounted; only the active one is shown */}
                   {[...opened].map((id) => (
                     <div key={id} className="si-term-layer" style={{ position: 'absolute', inset: 0, display: id === active ? 'block' : 'none' }}>
-                      <SessionTerm sessionId={id} senders={sendersRef} onMenu={reportMenu} />
+                      <SessionTerm sessionId={id} onMenu={reportMenu} />
                     </div>
                   ))}
                   {selSession?.status === 'offline' && (
@@ -492,19 +502,20 @@ export default function SessionInterface({ sessions, specs = [], focusNode, open
                   <span className="si-nav-help">{t('session.navHelp')}</span>
                 </div>
               ) : (
-                <div className="si-bottom">
+                <div className={sendErr ? 'si-bottom err' : 'si-bottom'}>
                   <span className="si-prompt">❯</span>
                   <textarea
                     ref={msgRef}
                     className="si-input"
                     rows={1}
                     value={msg}
-                    onChange={(e) => setMsg(e.target.value)}
+                    onChange={(e) => { setMsg(e.target.value); if (sendErr) setSendErr(false) }}
                     onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); sendMsg() } }}
                     placeholder={selSession?.status === 'offline' ? t('session.msgOffline') : t('session.msgPlaceholder')}
                     spellCheck={false}
                     disabled={selSession?.status === 'offline'}
                   />
+                  {sendErr && <span className="si-send-err" role="alert">{t('session.msgError')}</span>}
                 </div>
               )}
             </>

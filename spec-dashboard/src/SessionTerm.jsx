@@ -7,12 +7,13 @@ import '@xterm/xterm/css/xterm.css'
 
 // @@@ SessionTerm - a READ-ONLY live view of a session's tmux pane, wired to a REAL tmux client over one
 // WebSocket (/api/sessions/:id/socket). The human never types INTO the terminal — it is a pure scrollable
-// view. Server→client = raw pane bytes (binary) written straight to xterm. We do NOT forward keystrokes or
-// mouse back (disableStdin); the ONLY human input is the external message box (SessionInterface's ❯ line),
-// which writes into this pane via the `send` writer we register in `senders`. Because nothing types into
-// the view, scrolling it can never block input — xterm owns its own scrollback and the wheel scrolls it
-// natively (we return false from the wheel handler so tmux's mouse mode never steals the wheel). xterm is
-// SCALED to its panel by the FitAddon; each fit sends cols×rows so tmux renders at that size.
+// view. Server→client = raw pane bytes (binary) written straight to xterm. We do NOT forward keystrokes
+// back (disableStdin). Human prompts do NOT travel over this socket either: the external message box
+// (SessionInterface's ❯ line) dispatches them out-of-band through the control socket (POST /keys) so they
+// survive tmux copy-mode. The ONLY thing this socket writes back is the synthetic wheel→copy-mode scroll
+// (below). Because nothing types into the view, scrolling it can never block input — the wheel scrolls
+// tmux's real history (we return false from the wheel handler so tmux's mouse mode never steals the
+// wheel). xterm is SCALED to its panel by the FitAddon; each fit sends cols×rows so tmux renders at that size.
 //
 // SCROLL: the live feed is a tmux client that REPAINTS in place at a fixed cols×rows, so xterm's own
 // scrollback is just repaint noise — useless to scroll. The real history lives in tmux (mouse on, 50k
@@ -63,7 +64,7 @@ const IS_MAC = /mac/i.test((typeof navigator !== 'undefined' && (navigator.userA
 const SELECT_MOD = IS_MAC ? '⌥' : '⇧'
 const COPY_MOD = IS_MAC ? '⌘' : 'Ctrl'
 
-export default function SessionTerm({ sessionId, senders, onMenu }) {
+export default function SessionTerm({ sessionId, onMenu }) {
   const hostRef = useRef(null)
   const termRef = useRef(null)
   // brief "copied ✓" confirmation flashed by the copy chord; drives only the corner caption, not the term.
@@ -173,10 +174,11 @@ export default function SessionTerm({ sessionId, senders, onMenu }) {
       if (!flushRaf) flushRaf = requestAnimationFrame(flush)
     }
 
-    // @@@ the single human input - the external message box writes into THIS pane over the SAME socket.
-    // Returns false when the socket isn't open yet so the caller can fall back to POST /keys.
+    // @@@ scroll-only writer - the ONLY thing written back over this socket is synthetic wheel→copy-mode
+    // mouse reports (below). Human prompts do NOT go through here: they dispatch out-of-band via the control
+    // socket (POST /keys in SessionInterface) so they survive tmux copy-mode, which scrolling enters and
+    // which would otherwise eat pane bytes as navigation. This socket stays read-only display + scroll.
     const send = (data) => { if (ws.readyState !== WebSocket.OPEN) return false; ws.send(enc.encode(data)); return true }
-    if (senders) senders.current[sessionId] = send
 
     // @@@ wheel → tmux copy-mode - forward the wheel as SGR mouse reports so tmux scrolls its real pane
     // history (xterm's own scrollback is just repaint noise here). 64/65 = wheel up/down; col,row is the
@@ -241,7 +243,6 @@ export default function SessionTerm({ sessionId, senders, onMenu }) {
       if (termEl) termEl.removeEventListener('animationend', fitAndSync)
       ro.disconnect()
       window.removeEventListener('resize', fitAndSync)
-      if (senders && senders.current[sessionId] === send) delete senders.current[sessionId]
       try { ws.close() } catch { /* already closed */ }
       term.dispose()
       termRef.current = null

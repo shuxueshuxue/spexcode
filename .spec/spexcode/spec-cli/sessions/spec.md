@@ -55,9 +55,13 @@ states it carries a **strict active-only guard** (see below). `needs-input` is d
 `blocked` self-resumes when its background task finishes, whereas `needs-input` resumes only when a human
 sends the agent a new prompt. The agent-authored states (`awaiting`/`blocked`/`error`/`needs-input`) are
 declared, never inferred, and **win over liveness** in `reconcile`. `active` and `idle` are the **same
-live agent** — claude is the pane's foreground process whether it is churning or idle-waiting — so they
-share `reconcile`'s liveness check: **offline** if the tmux is gone or the pane fell back to a bare shell,
-else **idle** if the idle_prompt hook has fired since the last tool use, else **working**. The agent only
+live agent** — claude runs whether it is churning or idle-waiting — so they share `reconcile`'s liveness
+check, which is **deterministic and does not read the pane's foreground command**: a worker is launched
+through a wrapper (`reclaude`) that runs claude as a **child** rather than exec'ing it, so the pane's
+foreground command is the wrapper/shell even while claude is alive — the pane command is **not** a liveness
+signal. The truth that claude is up is its **rendezvous socket**, which claude holds open the whole time it
+is alive. So a session is **offline** if its tmux is gone **or** its rendezvous socket is absent (claude
+exited), else **idle** if the idle_prompt hook has fired since the last tool use, else **working**. The agent only
 ever *proposes*; **merge** and **close** are human-only, every proposal is reversible (back-to-working),
 and nothing auto-disappears, so a self-completed session is always findable. `merges` is metadata (a
 count, shown as a badge), not a state — after a merge the worktree returns to active.
@@ -131,13 +135,15 @@ emits (carrying the note), and the *spoken* alert on it is the manager's `spex w
 (ghosts, edit/delete/move marks, drift) + the session list — in one module, served identically at HTTP
 `/api/board` and `spex board` (the frontend only adds x/y pixels). `sessions.ts` holds the whole state
 machine and is the only writer of `.session`: `readSessionFile` / `writeSessionFile` (worktrees, not
-memory), `reconcile` (authored states→their label; active/idle→working, idle, or offline, where a pane at
-a bare shell counts as offline so a crashed claude isn't a false "working"), and the lifecycle writers
+memory), `reconcile` (authored states→their label; active/idle→working, idle, or offline, where a session
+whose **rendezvous socket is absent** counts as offline so a crashed/exited claude isn't a false "working"
+— liveness is the socket, never the pane's foreground command, which is the wrapper/shell), and the
+lifecycle writers
 `markStateFromCwd` / `markDoneFromCwd` / `markErrorFromCwd` / `markIdleFromCwd` (the last is the
 active-only-guarded inferred writer the idle_prompt hook calls). `newSession` adds the `node/<slug>` worktree,
 writes `.session`, isolates `CLAUDE.md` (`hideClaudeMd`), and launches claude on the private socket;
-`reopen` clears a proposal and `--resume`s a dead pane — and **when it relaunches it waits for the
-resumed agent's rendezvous socket to come up** (bounded poll) before returning, so a follow-on dispatch
+`reopen` clears a proposal and relaunches when claude is no longer up (no tmux, or no rendezvous socket) —
+and **when it relaunches it waits for the resumed agent's rendezvous socket to come up** (bounded poll) before returning, so a follow-on dispatch
 addresses a live socket rather than racing the boot; the human-only merge/close actions round out the
 lifecycle (`closeSession` is the only removal).
 

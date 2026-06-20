@@ -35,8 +35,10 @@ An existing session shows its **live tmux terminal** (SessionTerm) with the **si
 the bottom. The terminal is a **real tmux client but a pure read-only scrollable view** — the human never
 types into it. Read-only governs **input, not extraction**: a plain drag (no modifier) selects text, drawn in
 a bright always-on highlight, and `⌘`/`Ctrl`+C copies that exact selection with a "copied" flash; the mouse
-wheel scrolls tmux's real pane history. The pane is **dark** (the Claude Code TUI inside is built for a dark
-terminal) and **scales to its panel**. A (re)joining viewer is painted by a **single coherent full repaint**,
+wheel scrolls tmux's real pane history. Extraction is **terminal-like**: selecting and copying in the pane
+**never steal keyboard focus** from the docked `❯` box, so a human grabs scrollback text mid-sentence and
+keeps typing. The pane is **dark** (the Claude Code TUI inside is built for a dark terminal) and **scales to
+its panel**. A (re)joining viewer is painted by a **single coherent full repaint**,
 never a snapshot spliced into the live stream — so tab-switching leaves no half-painted state.
 
 Human input has **two channels for two jobs**. The docked **`❯` box** is the *prompt* channel: submitting

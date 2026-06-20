@@ -253,7 +253,27 @@ export type ConfigPreset = { name: string; title: string; desc: string; kind: st
 // system spec). loadConfig gathers the `slash` surface, loadSystemConfig the `system` surface; each scans the
 // flat children under every root and filters by the field. The plugins also show on the board as ordinary
 // spec nodes (via loadSpecs).
-const CONFIG_ROOTS = ['.config', 'config'].map((r) => join(SPEC_DIR, 'spexcode', r))
+// @@@ root node - the spec tree's single top-level node: the one directory directly under .spec/ that
+// holds a spec.md. The dogfood repo names it 'spexcode'; a repo scaffolded by `spex init` names it
+// 'project' (or whatever the adopter renames it to). Detected DYNAMICALLY so the config loaders resolve
+// the ACTUAL root's config dirs — never a hardcoded 'spexcode', which silently returned [] in an adopter
+// repo, so their .config/core contract never loaded and their launched agents got no system prompt.
+// Returns null when .spec holds no such directory. (resolveLayout's `main` is a checkout PATH, not the
+// root node NAME, so it can't serve this — a tiny filesystem probe is the right seam.)
+function rootNode(): string | null {
+  if (!existsSync(SPEC_DIR)) return null
+  for (const e of readdirSync(SPEC_DIR, { withFileTypes: true })) {
+    if (e.isDirectory() && existsSync(join(SPEC_DIR, e.name, 'spec.md'))) return e.name
+  }
+  return null
+}
+// BOTH config roots under the detected root node: `.config` (the instance — DIY dev-flow plugins) and
+// `config` (the project system spec). Resolved at call time (not module-eval) so it tracks the live tree.
+function configRoots(): string[] {
+  const root = rootNode()
+  if (!root) return []
+  return ['.config', 'config'].map((r) => join(SPEC_DIR, root, r))
+}
 // co-located bundle files = everything under the node folder except its spec.md, repo-relative, recursive.
 function bundleFiles(dir: string): string[] {
   const out: string[] = []
@@ -270,7 +290,7 @@ function bundleFiles(dir: string): string[] {
 // gather the preset nodes that are flat children of a config root and declare `surface: <surface>`.
 function loadSurface(surface: 'slash' | 'system'): ConfigPreset[] {
   const out: ConfigPreset[] = []
-  for (const root of CONFIG_ROOTS) {
+  for (const root of configRoots()) {
     if (!existsSync(root)) continue
     for (const e of readdirSync(root, { withFileTypes: true })) {
       const nodeDir = join(root, e.name)

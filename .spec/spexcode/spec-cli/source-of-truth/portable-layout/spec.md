@@ -3,7 +3,7 @@ title: portable-layout
 status: active
 session: sess-merge
 hue: 160
-desc: Layout (where main is, how worktrees map to nodes) is an external interface, not a hardcode.
+desc: Where things live — main, worktree→node mapping, the spec root node — is detected policy, never a baked-in name.
 code:
   - spec-cli/src/layout.ts
   - .nvmrc
@@ -40,6 +40,15 @@ that cheap and honest, only **managed** SpexCode worktrees (a `.session` label o
 get a spec delta — harness scratch worktrees (e.g. `agent-*`) are skipped, both to keep them off the
 board and to stop their large diffs dominating `/api/layout` latency; the per-worktree deltas are
 computed in parallel.
+
+The same *policy-not-hardcode* rule governs where the config loaders look. The spec tree's **root
+node** — the single top-level directory under `.spec/` that holds a `spec.md` — is detected at read
+time, never assumed by name: the dogfood repo's is `spexcode`, a `spex init` adopter's is `project`. So
+[[source-of-truth]]'s `specs.ts` resolves the two config roots (`<root>/.config` and `<root>/config`,
+scanned by `loadSurface` per [[surface]]) from that *detected* root, not a baked-in `spexcode`. Without
+it an adopter's `loadSystemConfig` returned nothing — their `.config/core` contract never loaded and
+their launched agents got no system prompt — so portability is only real when the config root travels
+with the rename.
 
 The reproducibility contract is concrete: `.nvmrc` pins Node (22) and is tracked; both package-locks
 (`spec-cli/`, `spec-dashboard/`) are tracked, so installs are deterministic. Machine-local artifacts

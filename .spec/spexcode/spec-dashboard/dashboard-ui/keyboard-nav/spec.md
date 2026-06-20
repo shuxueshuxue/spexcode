@@ -23,6 +23,7 @@ Move through the spec tree by **relationship, not geometry** — the tree sits a
 | `+`/`-`, `0` | zoom in / out, back to overview zoom |
 | `i`, double-click | open the node-info popup |
 | `Enter` | cross into the node's live session(s) |
+| `@` | start a fresh New Session targeting the focus (opens on the New tab, focus mention prefilled) |
 | `t` | toggle spec graph ↔ session graph |
 | `?`, `,` | help overlay, settings |
 | `nn`, `dd` | chord: new child under focus, delete focus |
@@ -47,6 +48,8 @@ Move through the spec tree by **relationship, not geometry** — the tree sits a
 A node does **not** belong to a session. `node.session` is only the *last editor* (a "last edited by" attribution), never a live link. The live link is the overlay — the session(s) whose pending ops currently touch the node, marked on the board by a `⏎` affordance.
 
 `Enter` crosses from *reading* a node to *driving* its agent, resolving by how many editors are live: **one** → jump straight in; **none** → open New Session prefilled with `@<node-id>`; **several** → open the session interface to pick which editor to drive.
+
+The `@` key is the unconditional, spec-oriented counterpart to Enter: where Enter asks "drive whoever is editing this node" (and may board an existing session), it always opens a **fresh** New Session already targeting the focus — never resolving live editors. Like the node chords below, it pre-seeds the New Session input (here with only the focus mention) and leaves the launch to the human.
 
 ## node chords
 

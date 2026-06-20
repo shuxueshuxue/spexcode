@@ -328,6 +328,12 @@ function Dashboard({ specs, sessions, reload }) {
       // (`t` toggles the session graph — handled at the top of onKey so it works from either graph.)
       // Enter opens the session board at the remembered tab (boarding switch — see openBoard).
       else if (e.key === 'Enter') { e.preventDefault(); openBoard() }
+      // @@@ @-key - the spec-oriented launch shortcut: jump straight to a FRESH New Session targeting the
+      // focused node. It always lands on the New tab (never the remembered tab) with `@<focus> ` pre-seeded,
+      // so starting a node-scoped session is one keystroke. Unlike Enter (which boards at the remembered tab
+      // and resolves live editors), `@` is UNCONDITIONAL — it never jumps into an existing session. Reuses
+      // startNew (the chord seed path); the seeded `@<id> ` reads as an accepted @-mention, caret after it.
+      else if (e.key === '@') { e.preventDefault(); startNew(`@${focus.id} `) }
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)

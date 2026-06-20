@@ -1100,6 +1100,33 @@ export async function watchSessions(emit: (line: string) => void, opts: WatchOpt
     await sleep(intervalMs)
   }
 }
+
+// @@@ wait - the ONE-SHOT blocking wait, the counterpart to `watch` (which streams forever and never
+// returns, so an agent that blocks on it to "wait for a worker" hangs its whole turn). Reuses the same
+// board poll (listSessions + selectSessions) but RETURNS the moment <id> reaches an actionable status —
+// the default set below, or the single `status` if the caller named one. A vanished session is terminal
+// (it can never reach the target now), and a timeout guarantees the wait can't hang forever.
+const WAIT_ACTIONABLE = new Set<DisplayStatus>(['review', 'needs-input', 'error', 'done', 'close-pending', 'blocked'])
+const DEFAULT_WAIT_TIMEOUT_MS = 20 * 60 * 1000   // 20 min — long enough for real work, short enough to never wedge a turn
+export type WaitResult = { status: DisplayStatus } | { timedOut: true } | { gone: true }
+export async function waitForSession(
+  id: string,
+  opts: { status?: string; timeoutMs?: number; intervalMs?: number } = {},
+): Promise<WaitResult> {
+  const { status, timeoutMs = DEFAULT_WAIT_TIMEOUT_MS, intervalMs = 2000 } = opts
+  const targets = status ? new Set<DisplayStatus>([status as DisplayStatus]) : WAIT_ACTIONABLE
+  const deadline = Date.now() + Math.max(1000, timeoutMs)
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+  for (;;) {
+    try {
+      const s = selectSessions(await listSessions(), [id])[0]
+      if (!s) return { gone: true }                       // unknown id / closed before the target — never will now
+      if (targets.has(s.status)) return { status: s.status }
+    } catch { /* transient git/tmux hiccup; keep polling */ }
+    if (Date.now() >= deadline) return { timedOut: true }
+    await sleep(Math.max(250, intervalMs))
+  }
+}
 // @@@ sendKeys - PROMPT control for a session, through the per-session rendezvous socket ONLY. The socket
 // injects AND submits the prompt and confirms the agent ACCEPTED it (see replyViaSocket); there is NO
 // send-keys fallback. A prompt that can't go through the socket — no socket (socketless/old session, or the

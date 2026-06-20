@@ -12,10 +12,14 @@ desc: The command line lives outside xterm, so the arrow keys are ours.
 A terminal is for *driving* a session, but xterm swallows every keystroke — including the arrows we
 navigate the tree with. So the command line must live **outside** xterm: the terminal is a read-only
 display, and a separate input owns the keys. Because the input is ours, an arrow can mean "navigate" when
-the line is empty and "edit" when it isn't — empty is the signal. The same ownership lets the input wear
-**completion menus** keyed off the first character: `@` summons spec nodes, and a leading `/` summons a
-command palette that mirrors Claude Code's own `/` menu — a familiar surface, but **decoupled**: choosing
-a command only inserts its `/<name> ` text, it never runs anything.
+the line is empty and "edit" when it isn't — empty is the signal. The same ownership lets an input wear
+**completion menus** keyed off the first character — but the two menus belong to **different inputs**,
+because they answer different questions. The **New Session** prompt wears the `@` menu (which spec node does
+this new session target?). A **running session's `❯` inbox** wears the `/` menu — a command palette that
+mirrors Claude Code's own `/` menu, which is where `/`-commands actually make sense: you are talking *to a
+live agent*. Both stay **decoupled**: choosing a row only inserts its token text (`@<id> ` / `/<name> `),
+it never runs anything. (The New Session line keeps no `/` menu of its own — that surface gets its own
+bespoke command set later, so the generic CC palette does not squat there in the meantime.)
 
 ## expanded spec
 
@@ -46,8 +50,11 @@ arrows belong to navigation while a modal owns the keys. So `TermPane.jsx` stand
 realisation, presently dormant, while the contract lives on over a real session pane — the realisation moved
 surfaces, the principle (input outside xterm so arrows can navigate) did not.
 
-The `/` command palette is the same idea, one rung up: a leading `/` on the New Session line opens a
-dropdown that **mirrors Claude Code's `/` menu** for this CC version. Its rows are the union of CC's
+The `/` command palette is the same idea, one rung up: a leading `/` on a **running session's `❯` inbox**
+opens a dropdown that **mirrors Claude Code's `/` menu** for this CC version. (It lives on the session inbox,
+not the New Session prompt — `/`-commands address a live agent, which is exactly what that box talks to; the
+New Session line is reserved for a bespoke command set of our own.) The inbox is docked at the bottom of the
+panel, so the dropdown opens **upward**, above the box. Its rows are the union of CC's
 **built-in** commands (a seed constant captured from a live `claude` `/` menu, so it is refreshable per
 version), the **user** commands under `~/.claude/commands/**` and **project** commands under
 `<repo>/.claude/commands/**` (name = path under `commands/` minus `.md`, subdirs namespaced `a:b`,

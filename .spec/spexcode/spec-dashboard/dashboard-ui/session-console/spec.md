@@ -132,7 +132,13 @@ board polling can't wipe typing) and submitting POSTs `/api/sessions` then switc
 An existing tab renders a **persistent stack** of `SessionTerm`s — one per session you've opened, only the
 active one shown — over the offline relaunch panel when the active session is `offline`; the docked `❯`
 textarea's Enter is the **only** input, pushing the line + Enter through the active terminal's registered
-socket writer (`sendersRef`), with `POST /api/sessions/:id/keys` as the not-yet-connected fallback. The
+socket writer (`sendersRef`), with `POST /api/sessions/:id/keys` as the not-yet-connected fallback. That
+`❯` box wears the **`/` slash-command completion** ([[term-input]]): a leading `/` opens the same command
+palette the New tab's `@` menu uses for keyboard machinery (↑/↓ move, ⏎/⇥ insert, Esc dismiss), here listing
+CC's `/`-commands instead of spec nodes, and — because the box is docked at the panel's bottom — opening
+**upward**. It is decoupled exactly like the `@` menu: picking a row only inserts `/<name> ` into the draft,
+and you still press Enter to dispatch the line. The New tab's prompt deliberately carries **no** `/` menu —
+that surface is reserved for a bespoke command set of our own. The
 header buttons map to the session's status (relaunch / merge / back-to-working / close), each a
 thin POST then a board reload (there is no `review` button — that transition is agent-proposed, not human). A window-level capture listener owns `↑`/`↓` list movement and Enter-on-New; while it is open the
 interface owns **all** its keys — the board delegates `Esc` to it, which the @-mention menu claims to

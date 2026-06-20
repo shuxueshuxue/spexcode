@@ -149,7 +149,7 @@ export default function SessionInterface({ sessions, specs = [], focusNode, open
 
   // nav mode binds to ONE live session's menu — leaving the tab (or it going offline) exits it, so raw
   // keystrokes can never leak into the wrong pane.
-  useEffect(() => { setNavMode(false); setSendErr(false) }, [active])
+  useEffect(() => { setNavMode(false); setSendErr(false); setMenu(null) }, [active])
   useEffect(() => { if (selSession?.status === 'offline') setNavMode(false) }, [selSession?.status])
   // forward one raw key to the active session's pane (fire-and-forget; the backend tmux send-keys it).
   const sendRawKey = (key) => {
@@ -236,37 +236,53 @@ export default function SessionInterface({ sessions, specs = [], focusNode, open
     }
   }
 
-  // @@@ completion menus - the New Session prompt drives TWO dropdowns sharing one state machine:
-  //   · slash  - the WHOLE line is a single `/token` (no space yet): mirrors Claude Code's `/` menu,
-  //              listing commands whose name matches the prefix. Typing a space (→ args) dismisses it,
-  //              exactly like CC. DECOUPLED — picking one only inserts `/<name> ` text, nothing runs.
-  //   · mention - an `@` that begins a word opens the spec-node dropdown (matched against id + spec path).
+  // @@@ completion menus - one state machine, but each input surface drives ONE kind of dropdown:
+  //   · New Session prompt → mention - an `@` that begins a word opens the spec-node dropdown (matched
+  //     against id + spec path), so you opt into the node a new session targets. (The `/` slash menu is
+  //     intentionally NOT here anymore — the New Session box gets its own bespoke command set later.)
+  //   · a session's ❯ inbox → slash - the WHOLE line is a single `/token` (no space yet): mirrors Claude
+  //     Code's `/` menu, listing commands whose name matches the prefix. Typing a space (→ args) dismisses
+  //     it, exactly like CC. DECOUPLED — picking one only inserts `/<name> ` text into the draft, nothing
+  //     runs; you still press Enter to dispatch the line to the agent.
   // The trigger is purely positional. For mention we scan back from the caret over non-space chars; it's
   // a mention only if we hit an `@` at a word boundary with no space up to the caret.
   const buildMenu = (value, caret) => {
+    if (active === 'new') {
+      let i = caret - 1
+      while (i >= 0 && value[i] !== '@' && !/\s/.test(value[i])) i--
+      if (i < 0 || value[i] !== '@') return null
+      if (i > 0 && !/\s/.test(value[i - 1])) return null        // @ must start a word, not be mid-token (email-ish)
+      const query = value.slice(i + 1, caret)
+      const items = matchSpecs(specs, query, focusId)
+      if (!items.length) return null
+      return { kind: 'mention', items, index: 0, start: i, end: caret, query }
+    }
     const sm = value.match(/^\/(\S*)$/)
     if (sm) {
       const items = matchSlash(slashCmds, sm[1])
       if (!items.length) return null
       return { kind: 'slash', items, index: 0, start: 0, end: value.length, query: sm[1] }
     }
-    let i = caret - 1
-    while (i >= 0 && value[i] !== '@' && !/\s/.test(value[i])) i--
-    if (i < 0 || value[i] !== '@') return null
-    if (i > 0 && !/\s/.test(value[i - 1])) return null        // @ must start a word, not be mid-token (email-ish)
-    const query = value.slice(i + 1, caret)
-    const items = matchSpecs(specs, query, focusId)
-    if (!items.length) return null
-    return { kind: 'mention', items, index: 0, start: i, end: caret, query }
+    return null
   }
   // recompute from the textarea's live value + caret (covers typing, deletes, and bare caret moves).
   const syncMenu = (el) => setMenu(el ? buildMenu(el.value, el.selectionStart) : null)
   const navMenu = (dir) => setMenu((m) => (m ? { ...m, index: (m.index + dir + m.items.length) % m.items.length } : m))
   // replace the menu's span under the caret with the picked item's token, then drop the caret after it.
-  // slash → `/<name> ` (insert-only, never executed); mention → `@<id> `.
+  // Each kind writes its OWN surface: slash → the active session's ❯ draft (msgRef), insert-only and never
+  // executed; mention → the New Session prompt (taRef). `@<id> ` / `/<name> ` both leave a trailing space.
   const accept = (item) => {
     if (!item || !menu) return
-    const insert = menu.kind === 'slash' ? `/${item.name} ` : `@${item.id} `
+    if (menu.kind === 'slash') {
+      const insert = `/${item.name} `
+      const before = msg.slice(0, menu.start)
+      setMsg(before + insert + msg.slice(menu.end))
+      setMenu(null)
+      const caret = before.length + insert.length
+      requestAnimationFrame(() => { const el = msgRef.current; if (el) { el.focus(); el.setSelectionRange(caret, caret) } })
+      return
+    }
+    const insert = `@${item.id} `
     const before = prompt.slice(0, menu.start)
     setPrompt(before + insert + prompt.slice(menu.end))
     setMenu(null)
@@ -347,8 +363,10 @@ export default function SessionInterface({ sessions, specs = [], focusNode, open
         if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) sendRawKey(e.key)
         return
       }
-      // the @-mention menu owns navigation/commit/dismiss while it's open (New Session tab only).
-      if (active === 'new' && menu) {
+      // a completion menu owns navigation/commit/dismiss while it's open — on the New Session prompt
+      // (@-mention) OR a session's ❯ inbox (slash). The capture-phase listener claims Enter before the
+      // inbox textarea's own onKeyDown, so picking a command never also dispatches the line.
+      if (menu) {
         if (e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); navMenu(1); return }
         if (e.key === 'ArrowUp')   { e.preventDefault(); e.stopPropagation(); navMenu(-1); return }
         if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); accept(menu.items[menu.index]); return }
@@ -413,25 +431,6 @@ export default function SessionInterface({ sessions, specs = [], focusNode, open
                   spellCheck={false}
                   disabled={sending}
                 />
-                {menu && menu.kind === 'slash' && (
-                  <ul className="mention-menu" role="listbox">
-                    <li className="mention-head">// {menu.query ? `/${menu.query}` : t('session.menuCommands')} — {t('session.menuHint')}</li>
-                    {menu.items.map((it, i) => (
-                      <li
-                        key={`${it.source}:${it.name}`}
-                        role="option"
-                        aria-selected={i === menu.index}
-                        className={i === menu.index ? 'mention-item on' : 'mention-item'}
-                        onMouseDown={(e) => { e.preventDefault(); accept(it) }}
-                        onMouseEnter={() => setMenu((m) => (m ? { ...m, index: i } : m))}
-                      >
-                        <span className="slash-name">/{highlight(it.name, menu.query)}</span>
-                        <span className="slash-desc">{it.description}</span>
-                        <span className={`slash-src src-${it.source}`}>{SRC_TAG[it.source] || it.source}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
                 {menu && menu.kind === 'mention' && (
                   <ul className="mention-menu" role="listbox">
                     <li className="mention-head">// {menu.query ? `@${menu.query}` : t('session.menuSpecNodes')} — {t('session.menuHint')}</li>
@@ -517,13 +516,35 @@ export default function SessionInterface({ sessions, specs = [], focusNode, open
                     className="si-input"
                     rows={1}
                     value={msg}
-                    onChange={(e) => { setMsg(e.target.value); if (sendErr) setSendErr(false) }}
+                    onChange={(e) => { setMsg(e.target.value); if (sendErr) setSendErr(false); syncMenu(e.target) }}
+                    onSelect={(e) => syncMenu(e.target)}
+                    onBlur={() => setMenu(null)}
                     onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); sendMsg() } }}
                     placeholder={selSession?.status === 'offline' ? t('session.msgOffline') : t('session.msgPlaceholder')}
                     spellCheck={false}
                     disabled={selSession?.status === 'offline'}
                   />
                   {sendErr && <span className="si-send-err" role="alert">{t('session.msgError')}</span>}
+                  {/* slash-command menu — docked at the bottom, so it opens UPWARD (`up`) above the ❯ box. */}
+                  {menu && menu.kind === 'slash' && (
+                    <ul className="mention-menu up" role="listbox">
+                      <li className="mention-head">// {menu.query ? `/${menu.query}` : t('session.menuCommands')} — {t('session.menuHint')}</li>
+                      {menu.items.map((it, i) => (
+                        <li
+                          key={`${it.source}:${it.name}`}
+                          role="option"
+                          aria-selected={i === menu.index}
+                          className={i === menu.index ? 'mention-item on' : 'mention-item'}
+                          onMouseDown={(e) => { e.preventDefault(); accept(it) }}
+                          onMouseEnter={() => setMenu((m) => (m ? { ...m, index: i } : m))}
+                        >
+                          <span className="slash-name">/{highlight(it.name, menu.query)}</span>
+                          <span className="slash-desc">{it.description}</span>
+                          <span className={`slash-src src-${it.source}`}>{SRC_TAG[it.source] || it.source}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               )}
             </>

@@ -487,6 +487,8 @@ body {
   background: var(--paper); border: 1px solid var(--blue); border-radius: 4px;
   box-shadow: 0 6px 18px rgba(7, 54, 66, 0.16); animation: si-rise .12s ease;
 }
+/* the session ❯ inbox is docked at the bottom of the panel, so its slash menu opens UPWARD instead. */
+.mention-menu.up { top: auto; bottom: calc(100% + 4px); }
 .mention-head {
   padding: 3px 8px 5px; font-size: 10.5px; color: var(--muted); letter-spacing: .02em;
   border-bottom: 1px solid var(--line); margin-bottom: 3px; white-space: nowrap;
@@ -528,7 +530,7 @@ body {
 .si-line { font-size: 12px; line-height: 1.6; color: var(--ink2); white-space: pre-wrap; word-break: break-word; }
 .si-line.muted { color: var(--muted); }
 .si-op { color: var(--blue); font-weight: 700; }
-.si-bottom { display: flex; align-items: center; gap: 8px; margin: 0 12px 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.si-bottom { position: relative; display: flex; align-items: center; gap: 8px; margin: 0 12px 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
 .si-prompt { color: var(--blue); flex: none; }
 .si-bottom .si-input:disabled { color: var(--muted); }
 /* fail-loud: /keys dispatch failed — outline red and show the message wasn't delivered (draft restored). */

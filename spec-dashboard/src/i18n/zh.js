@@ -136,9 +136,20 @@ export default {
 
   sessionGraph: {
     brand: '$ session-graph',
-    hint: '连线 = 实时监视（A→B：A 正在监视 B）· 方向键/hjkl 移动 · ⏎ 或点击打开 · 拖动 A→B 让 A 监视 B · 按 t 切换返回',
+    helpTitle: '快捷键与图例（?）',
     asked: ({ a, b }) => `已请求 ${a} 监视 ${b}`,
     monitorPrompt: ({ label, id }) => `请监视会话 ${label}（${id}）：在后台运行 \`spex watch ${id}\` 并保持运行，让其状态变化反馈给我。`,
+    legend: {
+      title: '会话图',
+      close: '关闭（esc 或 ?）',
+      secKeys: '快捷键',
+      move: '将光标移到最近的会话',
+      open: '打开聚焦的会话',
+      monitor: '拖动 A→B 让 A 监视 B',
+      back: '切换返回规格图',
+      secEdges: '连线',
+      edgesDesc: '每条箭头 A→B 都是一个实时监视——智能体 A 正在运行 `spex watch B`。',
+    },
   },
 
   session: {
@@ -151,8 +162,7 @@ export default {
     menuPresets: '配置预设',
     menuSpecNodes: '规格节点',
     menuHint: '↑↓ 选择 · ⏎ 插入',
-    hintFocused: { before: '输入 ', mid: ' 以引用规格——', after: '（聚焦）排在最前' },
-    hintNoFocus: { before: '输入 ', after: ' 以引用规格——否则此提示与节点无关' },
+    hint: { before: '输入 ', mid: ' 以引用规格 · ', after: ' 以套用配置预设' },
     navBtn: '导航',
     navTitle: '导航模式——转发原始按键以操作智能体的交互菜单（⌃/⌘+I）',
     relaunch: '重新启动',

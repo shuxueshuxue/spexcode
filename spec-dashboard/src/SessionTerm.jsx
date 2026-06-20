@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
@@ -59,17 +59,11 @@ function looksLikeMenu(term) {
   return caret && hint
 }
 
-// @@@ copy hint - drag selects with no modifier (forced always-on below), so the caption only names the
-// copy chord: ⌘C on macOS, Ctrl+C elsewhere.
-const IS_MAC = /mac/i.test((typeof navigator !== 'undefined' && (navigator.userAgentData?.platform || navigator.platform)) || '')
-const COPY_MOD = IS_MAC ? '⌘' : 'Ctrl'
-
 export default function SessionTerm({ sessionId, onMenu }) {
   const hostRef = useRef(null)
   const termRef = useRef(null)
   // brief "copied ✓" confirmation flashed by the copy chord; drives only the corner caption, not the term.
   const [copied, setCopied] = useState(false)
-  const hint = useMemo(() => `drag select · ${COPY_MOD}C copy`, [])
   // keep the latest onMenu without re-running the terminal effect (it'd tear down the WebSocket every render).
   const onMenuRef = useRef(onMenu)
   onMenuRef.current = onMenu
@@ -262,8 +256,8 @@ export default function SessionTerm({ sessionId, onMenu }) {
   return (
     <div className="st-wrap">
       <div className="st-host" ref={hostRef} />
-      {/* subtle corner caption: how to grab text out of the read-only pane (flashes a copy confirmation). */}
-      <div className={copied ? 'st-copyhint copied' : 'st-copyhint'}>{copied ? 'copied ✓' : hint}</div>
+      {/* subtle corner caption: only the copy confirmation flashes by the copy chord — no idle hint. */}
+      {copied && <div className="st-copyhint copied">copied ✓</div>}
     </div>
   )
 }

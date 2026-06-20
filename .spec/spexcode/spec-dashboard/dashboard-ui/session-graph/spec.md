@@ -24,6 +24,10 @@ as watches start and stop. The one human gesture is **asking**: dragging A→B d
 `t` (an otherwise-unbound board key, so it shadows no nav) opens a full-screen session-graph over the
 board; Esc returns. Because a hidden hotkey is undiscoverable, the board also carries a **small floating
 button** that opens the same view, and `t` is **listed in the help/legend** alongside the other board keys.
+The same discipline governs the view's **own** keys: rather than an always-on inline hint, the graph carries
+the **same discreet `?` help affordance the board uses** (key or button), opening a small legend of its
+keymap (move · open · drag-to-monitor · `t` back) and its edge vocabulary — one consistent help surface
+across both graphs, not a standing wall of text.
 Isolation is the governing principle: the view runs in its **own** ReactFlow context (separate camera,
 selection, store) and reads its **own** data (`GET /api/sessions/graph`, see [[sessions]]) — it shares no
 state with the board, so it cannot break it. While it is open it **owns all keys** (the board's keydown

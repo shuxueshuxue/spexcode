@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ReactFlow, ReactFlowProvider, Background, Controls, Handle, Position,
+  ReactFlow, ReactFlowProvider, Background, MiniMap, Handle, Position,
   MarkerType, useReactFlow,
 } from '@xyflow/react'
 import { Avatar } from './avatar.jsx'
 import { labelColor } from './color.js'
+import Modal from './Modal.jsx'
 import { useT } from './i18n/index.jsx'
 
 // @@@ session-graph - the EXPERIMENTAL directed monitor network: each session is a node, each LIVE
@@ -73,7 +74,7 @@ function frameViewport(pos, sessions) {
   return { x: w / 2 - ((minX + maxX) / 2) * zoom, y: h / 2 - ((minY + maxY) / 2) * zoom, zoom }
 }
 
-function GraphCanvas({ onOpen, active }) {
+function GraphCanvas({ onOpen, active, legend, setLegend }) {
   const t = useT()
   const [graph, setGraph] = useState({ nodes: [], edges: [] })
   const [loaded, setLoaded] = useState(false)        // first fetch done → safe to mount already-framed
@@ -189,6 +190,13 @@ function GraphCanvas({ onOpen, active }) {
     if (!active) return // a session console is open over this graph — it owns the keys (incl. ⏎ and arrows)
     const onKey = (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return
+      // the help modal (keymap + legend) is itself a modal: while open it OWNS the keys — only `?`/Esc
+      // close it, nav never leaks to the graph behind. `?` opens it from the board.
+      if (legend) {
+        if (e.key === 'Escape' || e.key === '?') { e.preventDefault(); e.stopPropagation(); setLegend(false) }
+        return
+      }
+      if (e.key === '?') { e.preventDefault(); e.stopPropagation(); setLegend(true); return }
       const cur = byId[focusRef.current]
       if (e.key === 'Enter') {
         if (cur) { e.preventDefault(); e.stopPropagation(); onOpen?.(cur.id) }
@@ -215,7 +223,7 @@ function GraphCanvas({ onOpen, active }) {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [active, byId, pos, graph.nodes, CONES, onOpen, setCenter, getViewport])
+  }, [active, byId, pos, graph.nodes, CONES, onOpen, setCenter, getViewport, legend, setLegend])
 
   // re-frame gently when the session count changes AFTER the first paint (a watch/session appeared); the
   // first paint is already framed by the computed defaultViewport, so we skip it to avoid a redundant pan.
@@ -238,10 +246,46 @@ function GraphCanvas({ onOpen, active }) {
         proOptions={{ hideAttribution: true }}
       >
         <Background variant="dots" color="#cdc6ad" gap={20} size={1} />
-        <Controls showInteractive={false} />
+        {/* mini-map replaces the +/−/fit button cluster — scroll/pinch zoom stays on (ReactFlow default).
+            Each session shows in its own hue; drag the map to pan, scroll over it to zoom. */}
+        <MiniMap pannable zoomable nodeColor={(n) => labelColor(n.id)} nodeStrokeWidth={2} maskColor="rgba(0,0,0,0.06)" />
       </ReactFlow>
       {toast && <div className="sg-toast">{toast}</div>}
     </>
+  )
+}
+
+// @@@ SessionGraphLegend - the session graph's keymap + edge vocabulary, shown in the shared centered Modal
+// opened by the HUD's discreet `?` (key or click) — the SAME affordance the spec board uses (see Legend.jsx),
+// so the wall of inline hints that used to sit in the HUD now lives behind one button on BOTH graphs.
+function SessionGraphLegend({ onClose }) {
+  const t = useT()
+  const KEYS = [
+    [['↑', 'k', '↓', 'j', '←', 'h', '→', 'l'], 'move'],
+    [['⏎'], 'open'],
+    [['t'], 'back'],
+  ]
+  return (
+    <Modal title={t('sessionGraph.legend.title')} closeLabel={t('sessionGraph.legend.close')} onClose={onClose}>
+      <section className="legend-sec">
+        <div className="legend-h">{t('sessionGraph.legend.secKeys')}</div>
+        {KEYS.map(([keys, descKey]) => (
+          <div className="legend-row" key={descKey}>
+            <span className="keymap-keys">{keys.map((k, i) => <kbd key={i}>{k}</kbd>)}</span>
+            <span className="legend-desc">{t(`sessionGraph.legend.${descKey}`)}</span>
+          </div>
+        ))}
+        <div className="legend-row">
+          <span className="legend-desc">{t('sessionGraph.legend.monitor')}</span>
+        </div>
+      </section>
+      <section className="legend-sec">
+        <div className="legend-h">{t('sessionGraph.legend.secEdges')}</div>
+        <div className="legend-row">
+          <span className="legend-desc">{t('sessionGraph.legend.edgesDesc')}</span>
+        </div>
+      </section>
+    </Modal>
   )
 }
 
@@ -250,15 +294,17 @@ function GraphCanvas({ onOpen, active }) {
 // without touching the existing views. onOpen crosses a clicked node into its session console (board path).
 export default function SessionGraph({ onOpen, active = true }) {
   const t = useT()
+  const [legend, setLegend] = useState(false)
   return (
     <div className="session-graph">
       <div className="sg-hud">
         <span className="brand">$ session-graph</span>
-        <span className="sg-hint">{t('sessionGraph.hint')}</span>
+        <button className="hud-help" onClick={() => setLegend((v) => !v)} title={t('sessionGraph.helpTitle')}>?</button>
       </div>
       <ReactFlowProvider>
-        <GraphCanvas onOpen={onOpen} active={active} />
+        <GraphCanvas onOpen={onOpen} active={active} legend={legend} setLegend={setLegend} />
       </ReactFlowProvider>
+      {legend && <SessionGraphLegend onClose={() => setLegend(false)} />}
     </div>
   )
 }

@@ -618,7 +618,6 @@ body {
   position: absolute; top: 16px; left: 18px; z-index: 5;
   display: flex; flex-direction: column; gap: 6px; pointer-events: none;
 }
-.sg-hint { color: var(--muted); font-size: 11px; }
 /* a session node: avatar + label + status, ringed in its own hue (--sg from labelColor(id)). */
 .sg-node {
   display: flex; flex-direction: column; align-items: center; gap: 3px;

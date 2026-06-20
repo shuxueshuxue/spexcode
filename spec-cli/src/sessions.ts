@@ -8,7 +8,7 @@ import { createConnection } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { git, gitA, gitTry, repoRoot, mergeBaseDiff, mergeConflicts, type ReviewDiffFile } from './git.js'
 import { guardWorktree } from './resilience.js'
-import { loadSystemConfig, type ConfigPreset } from './specs.js'
+import { loadSystemConfig, loadSpecs, type ConfigPreset } from './specs.js'
 
 // @@@ sessions - the WORKTREE is the durable unit; tmux is a disposable runtime handle. Each session
 // worktree carries an untracked `.session` file (the source of truth) that survives a kill / reboot /
@@ -788,6 +788,14 @@ export async function newSession(node: string | null, prompt: string): Promise<S
     launchPrompt = newNodePrompt(placeholderId, directive.targetId, relPath, directive.rest)
   } else if (directive?.kind === 'delete') {
     launchPrompt = deleteNodePrompt(directive.targetId, removeNode(path, directive.targetId), directive.rest)
+  } else if (ref) {
+    // @@@ spec pointer - the ref (explicit --node, else the prompt's first @mention) named an EXISTING node.
+    // Append ONE line pointing the agent at that node's spec.md as an ABSOLUTE path INSIDE its own worktree, so
+    // it reads the LIVE file (never a stale snapshot we'd inject). relPath already carries the .spec/ prefix and
+    // is identical in this freshly-branched worktree, so the absolute path is just join(worktree, relPath). Only
+    // a real node gets a pointer; an unknown id resolves to nothing and we fail quiet (no pointer appended).
+    const spec = (await loadSpecs()).find((n) => n.id === ref)
+    if (spec) launchPrompt = `${prompt}\n\nThe spec node \`${ref}\` is your ground truth — read its spec at ${join(path, spec.path)}.`
   }
   writeLaunchFile(path, launchPrompt)   // park the exact launch prompt for the drainer (consumed at launch)
   await drainQueue()                    // launch now if under the cap, else leave it queued for a free slot

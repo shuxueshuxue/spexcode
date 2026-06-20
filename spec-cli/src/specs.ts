@@ -231,3 +231,47 @@ export async function specDiffAt(id: string, hash: string) {
   if (!hash) return { hash: '', patch: '' }
   return latestDiff(node.relPath, hash)
 }
+
+// @@@ config presets - REFLEXIVE, SKILL-SHAPED preset nodes under .spec/spexcode/config/*. Each is an
+// ordinary spec node (it also shows on the board, parented to spexcode) BUT its folder is also a skill
+// bundle: `spec.md`'s body is the agent prompt/contract (with a {{targets}} placeholder the launcher fills
+// with the @-referenced nodes), and the SAME folder may co-locate auxiliary files — scripts, assets — that
+// the preset ships for the agent to run deterministically. So /api/config reports each node's folder `dir`
+// (repo-relative) and its `files` (co-located paths, spec.md excluded) alongside name/title/desc/kind/body.
+// The launcher lists these in the new-session `/` dropdown and composes body + targets + free text + the
+// folder path into the launched agent's prompt, so the agent can reach its own scripts. `kind` ∈
+// mutating|report tells the launcher whether the preset edits the graph or only reports on it.
+export type ConfigPreset = { name: string; title: string; desc: string; kind: string; dir: string; files: string[]; body: string }
+const CONFIG_DIR = join(SPEC_DIR, 'spexcode', 'config')
+// co-located bundle files = everything under the node folder except its spec.md, repo-relative, recursive.
+function bundleFiles(dir: string): string[] {
+  const out: string[] = []
+  const walk = (d: string) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name)
+      if (e.isDirectory()) walk(p)
+      else if (e.name !== 'spec.md') out.push(relative(ROOT, p))
+    }
+  }
+  walk(dir)
+  return out.sort()
+}
+export function loadConfig(): ConfigPreset[] {
+  if (!existsSync(CONFIG_DIR)) return []
+  const out: ConfigPreset[] = []
+  for (const e of readdirSync(CONFIG_DIR, { withFileTypes: true })) {
+    const nodeDir = join(CONFIG_DIR, e.name)
+    if (!e.isDirectory() || !existsSync(join(nodeDir, 'spec.md'))) continue
+    const { fm, body } = parseFrontmatter(readFileSync(join(nodeDir, 'spec.md'), 'utf8'))
+    out.push({
+      name: e.name,
+      title: str(fm.title, e.name),
+      desc: str(fm.desc),
+      kind: str(fm.kind, 'mutating'),
+      dir: relative(ROOT, nodeDir),
+      files: bundleFiles(nodeDir),
+      body: body.trim(),
+    })
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name))
+}

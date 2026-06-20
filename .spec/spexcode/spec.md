@@ -15,6 +15,10 @@ Everything else is a child package: **spec-dashboard** (the node-graph UI), **sp
 the git-as-database reader, and the source-of-truth guards), and **spec-yatsu** (computer-use A→B
 evidence, not built yet).
 
+`config/` holds **reflexive, skill-shaped preset nodes** — each a spec node whose folder bundles a prompt
+template (`spec.md`, with a `{{targets}}` placeholder) plus any helper scripts/assets, served by
+`GET /api/config` for the new-session `/` dropdown to compose over @-referenced target nodes.
+
 ## origin (hour 0)
 The original prompt that defined the system, kept verbatim:
 

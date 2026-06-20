@@ -2,7 +2,7 @@ import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { createNodeWebSocket } from '@hono/node-ws'
-import { loadSpecs, specHistory, specDiffAt } from './specs.js'
+import { loadSpecs, specHistory, specDiffAt, loadConfig } from './specs.js'
 import { resolveLayout } from './layout.js'
 import { buildBoard } from './board.js'
 import { newSession, listSessions, sendKeys, rawKey, closeSession, reopen, propose, mergeSession, sessionGraph, registerWatch, deregisterWatch } from './sessions.js'
@@ -27,6 +27,11 @@ app.get('/api/specs/:id/history', async (c) => c.json(await specHistory(c.req.pa
 // lazily when an older version's item expands (the latest version's diff ships with the board as node.lastDiff).
 app.get('/api/specs/:id/diff/:hash', async (c) => c.json(await specDiffAt(c.req.param('id'), c.req.param('hash'))))
 app.get('/api/layout', async (c) => c.json(await resolveLayout()))
+// @@@ config presets - the reflexive, skill-shaped preset nodes (.spec/spexcode/config/*). Each entry
+// carries its prompt `body` (with a {{targets}} placeholder), its `kind` (mutating|report), and its
+// folder `dir` + co-located `files` so the launcher can both list it in the new-session `/` dropdown and
+// tell the launched agent where its own scripts/assets live. Read live from disk (no git), like the specs.
+app.get('/api/config', (c) => c.json(loadConfig()))
 // the dashboard input's `/` dropdown — the union of built-in + user/project/skill commands, computed
 // the same way Claude Code computes its own `/` menu. Insert-only on the client; nothing executes here.
 app.get('/api/slash-commands', (c) => c.json(slashCommands()))

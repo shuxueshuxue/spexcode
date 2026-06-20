@@ -49,6 +49,37 @@ after the hook source (`scripts/hooks/pre-commit`) changes**, since `.git/hooks/
 Convention for live work: worktrees in `.worktrees/`, branch `node/<id>`, plus an untracked `.session`
 file (`node:` / `session:` / `status:` lines) that the layout linker reads.
 
+## Supervising — the manager loop
+
+If you're the **managing session** (you read this file), you're a **manager**, not a worker. Don't
+write feature code and don't deep-read source — that's what workers are for. Read the goal node and
+this loop, then **dispatch immediately**: decompose the goal into spec-node-sized tasks and delegate
+each. There is no discovery phase.
+
+- **DISPATCH** — `spex new "<task>" --node <id>` launches one worker. Give it **only its task**; the
+  whole contract (the dogfood ritual, the commit-before-declare gate, the merge style) reaches it
+  through its own system prompt and the product mechanism — don't restate any of it. One independent
+  feature per node.
+- **PARALLELIZE** — dispatch independent nodes **concurrently**. That parallelism is the core payoff
+  of spec-driven dev, so reach for it; don't serialize out of caution. Contention on `main` is fine —
+  git serializes the merges, and a conflict just means you re-merge. Never throttle parallel work to
+  avoid conflicts.
+- **MONITOR** — `spex watch` streams session transitions. Two read-noise traps: a worker shows
+  `offline` for the **first ~15–20s** after launch (the boot window — transient, do **not** react to
+  it); and `spex watch` can emit a spurious `closed`/`removed` — **verify against git** (`git -C <root>
+  log --all`, branch still present) before treating any work as lost.
+- **REVIEW** — `spex review <id>` prints the one review payload: commits ahead of `main`, the
+  merge-base diff (the worker's real changes), and the merge/typecheck/lint gates. Decide from that —
+  you don't hand-run git or read the source.
+- **MERGE** — `git -C <root> merge --no-ff <branch>`. Then **confirm the merge landed**: `git -C <root>
+  log -1` must show `HEAD` advanced to the new merge commit **before** you go any further. Never close
+  an unmerged branch — closing discards the work.
+- **CLOSE** — only **after** the merge is confirmed: `spex session close <id>`.
+- **GUIDE** — `spex session send <id> "<msg>"` corrects or steers a live worker. Keep `spex lint` at
+  **0 errors** across the tree.
+- **FOOTGUN** — `spex session new --help` is **not** a help flag: it CREATES a stray session. Always
+  dispatch with `spex new`.
+
 ## What a spec node is
 
 - A node = a directory under `.spec/` containing a `spec.md`. `id` = directory basename; `parent` =

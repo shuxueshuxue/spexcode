@@ -10,6 +10,7 @@ import Legend from './Legend.jsx'
 import Settings from './Settings.jsx'
 import SpecSearch from './SpecSearch.jsx'
 import { loadBoard, layout, X_GAP, Y_GAP } from './data.js'
+import { createMomentumScroll } from './scroll.js'
 import { labelColor } from './color.js'
 import { useT } from './i18n/index.jsx'
 
@@ -46,12 +47,11 @@ function Dashboard({ specs, sessions, reload }) {
   const graphRef = useRef(null)
   const animRef = useRef(0)
   const chordRef = useRef({ buf: '', timer: 0 })  // pending board-chord buffer (see onKey)
-  // @@@ popup scroll momentum - j/k in the info popup ease the open pane toward an ACCUMULATING
-  // target (refs survive across keydowns), so held / repeated keys add up into one continuous glide
-  // instead of restarting a fresh `behavior:'smooth'` tween each press (which stuttered on key-repeat).
-  const scrollAnimRef = useRef(0)
-  const scrollTargetRef = useRef(null)
-  const scrollElRef = useRef(null)
+  // @@@ momentum scrollers - j/k glide for the two scrollable modals, one instance each so their
+  // accumulating targets stay independent. The popup pane and the help body share ONE implementation
+  // (createMomentumScroll); see scroll.js for the easing/target mechanics.
+  const popupScroll = useMemo(() => createMomentumScroll(), [])
+  const legendScroll = useMemo(() => createMomentumScroll(), [])
 
   // resolve focus on the RAW tree first (resilient to a polled-away merged/closed node), then expand.
   const rawById = useMemo(() => Object.fromEntries(specs.map((s) => [s.id, s])), [specs])
@@ -272,26 +272,11 @@ function Dashboard({ specs, sessions, reload }) {
     // nav just moves focus; the follow-focus effect recenters once the tree has re-plotted around the new
     // focus (passing the stale pre-re-plot node straight to centerOn would aim at its OLD coordinates).
     const go = (t, e) => { if (t) { e.preventDefault(); e.stopPropagation(); setFocusId(t.id) } }
-    // @@@ bumpScroll - ease the open popup pane toward an accumulating target. A press bumps the target
-    // by `delta` (clamped to the scroll range); one rAF loop eases scrollTop toward it (fixed fraction
-    // per frame = exponential glide). Repeated/held j/k stack onto the SAME target, so the motion stays
-    // one continuous flow. Switching panes swaps the scroller element, which resets the stale target.
-    const bumpScroll = (delta) => {
-      const sc = document.querySelector('.ov-body .pane-doc, .ov-body .pane-hist, .ov-body .pane-issues')
-      if (!sc) return
-      if (sc !== scrollElRef.current) { scrollElRef.current = sc; scrollTargetRef.current = null }
-      const max = sc.scrollHeight - sc.clientHeight
-      const base = scrollTargetRef.current ?? sc.scrollTop
-      scrollTargetRef.current = Math.max(0, Math.min(max, base + delta))
-      cancelAnimationFrame(scrollAnimRef.current)
-      const step = () => {
-        const d = scrollTargetRef.current - sc.scrollTop
-        if (Math.abs(d) < 0.5) { sc.scrollTop = scrollTargetRef.current; return }
-        sc.scrollTop += d * 0.2
-        scrollAnimRef.current = requestAnimationFrame(step)
-      }
-      scrollAnimRef.current = requestAnimationFrame(step)
-    }
+    // @@@ bumpScroll - glide the open popup pane by `delta` via the shared momentum scroller. Only one
+    // pane is mounted at a time, so the first matching `.ov-body` descendant is the scroller; when panes
+    // switch the element changes and the scroller drops its stale target (see scroll.js).
+    const bumpScroll = (delta) => popupScroll(
+      document.querySelector('.ov-body .pane-doc, .ov-body .pane-hist, .ov-body .pane-issues'), delta)
     const onKey = (e) => {
       // @@@ graph toggle - `t` is the ONE switch between the spec graph and the session graph, and it
       // toggles BOTH ways. It is the only crossing: Esc never switches graphs, and opening a session
@@ -336,6 +321,13 @@ function Dashboard({ specs, sessions, reload }) {
       // sessionUI/overlay guards so those modals are never disturbed; `?` opens it from the board.
       if (legend) {
         if (e.key === 'Escape' || e.key === '?') { e.preventDefault(); setLegend(false); return }
+        // j/k and ↑/↓ scroll the (often taller-than-viewport) help body — same momentum glide as the
+        // popup pane, via the legend's own scroller instance. The `.legend` panel is the overflow box.
+        if (e.key === 'j' || e.key === 'k' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault(); e.stopPropagation()
+          legendScroll(document.querySelector('.legend'), e.key === 'j' || e.key === 'ArrowDown' ? 120 : -120)
+          return
+        }
         return
       }
       if (e.key === '?') { e.preventDefault(); setLegend(true); return }
@@ -407,7 +399,7 @@ function Dashboard({ specs, sessions, reload }) {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [overlay, sessionUI, legend, settings, graphView, search, focus, overlayNodes, upTarget, downTarget, rightTarget, parent, centerOn, getViewport, openBoard, startNew])
+  }, [overlay, sessionUI, legend, settings, graphView, search, focus, overlayNodes, upTarget, downTarget, rightTarget, parent, centerOn, getViewport, openBoard, startNew, popupScroll, legendScroll])
 
   // clicking a node focuses it; the follow-focus effect then re-plots the tree around it and pans the
   // camera to keep it in place (a click drills the same way the arrows do). It does NOT open a session —

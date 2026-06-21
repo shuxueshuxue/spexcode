@@ -7,6 +7,7 @@ desc: Move by relationship, not geometry.
 code:
   - spec-dashboard/src/App.jsx
   - spec-dashboard/src/SpecSearch.jsx
+  - spec-dashboard/src/scroll.js
 ---
 # keyboard-nav
 
@@ -66,7 +67,7 @@ The `@` key is the unconditional, spec-oriented counterpart to Enter: where Ente
 
 ## HUD & help
 
-The HUD carries only the brand and a discreet `?`. The full keymap and the node's visual vocabulary (status dots, op glyphs, badges, rings) live together in **one** centered, scrollable modal — `?` opens it; `Esc`, a backdrop click, or its `×` closes it. There is no second copy of the legend.
+The HUD carries only the brand and a discreet `?`. The full keymap and the node's visual vocabulary (status dots, op glyphs, badges, rings) live together in **one** centered, scrollable modal — `?` opens it; `j`/`k` (or `↑`/`↓`) glide its body when it overflows the viewport; `Esc`, a backdrop click, or its `×` closes it. There is no second copy of the legend. That same `j`/`k` momentum glide drives the node-info popup's open pane — one shared scroller, not two copies.
 
 ## governed file
 

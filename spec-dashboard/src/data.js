@@ -109,7 +109,7 @@ export async function loadBoard() {
   return res.json()
 }
 
-// @@@ loadConfig - the reflexive, skill-shaped slash presets (config nodes under a `*/slash/` dir) the
+// @@@ loadConfig - the reflexive, skill-shaped slash presets (config nodes carrying `surface: slash`) the
 // backend serves at /api/config: [{ name, title, desc, kind, dir, files, body }]. The new-session box lists these under its
 // `/` palette and composes the picked preset's `body` (its {{targets}} filled by @-resolved nodes) into the
 // launch prompt. Rides the same zero-downtime backoff as the board fetch.
